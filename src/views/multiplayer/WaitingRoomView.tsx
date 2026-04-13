@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { motion } from "motion/react";
+import { motion, type Variants } from "motion/react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation } from "@/lib/liveblocks";
@@ -28,6 +28,11 @@ const PLAYER_COLORS = [
   "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9",
   "#f472b6", "#34d399", "#818cf8", "#94a3b8",
 ];
+
+const item: Variants = {
+  hidden: { opacity: 0, y: 12 },
+  show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } },
+};
 
 export function WaitingRoomView() {
   const { state, goTo } = useGame();
@@ -190,11 +195,6 @@ export function WaitingRoomView() {
 
   const playerCount = players?.length ?? 0;
   const canStart = mp.isHost && playerCount >= 2;
-
-  const item = {
-    hidden: { opacity: 0, y: 12 },
-    show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } },
-  };
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4">

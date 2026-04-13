@@ -34,6 +34,11 @@ export function MultiGuessView() {
     .map(([id, info]) => ({ id, color: info.color, name: info.name }));
   const amIGuesser = guessers.some((g) => g.id === mp.playerId);
 
+  const allGuessersLocked = guessers.length > 0 && !!currentEntry && guessers.every((g) => {
+    const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+    return !!guessResults[key];
+  });
+
   const authorDial = currentEntry
     ? (playerDials[currentEntry.authorId]?.[currentEntry.dialIndex] ?? null)
     : null;
@@ -124,11 +129,6 @@ export function MultiGuessView() {
     : null;
   const myResult = myResultKey ? guessResults[myResultKey] : undefined;
   const myLocked = !!myResult;
-
-  const allGuessersLocked = guessers.length > 0 && guessers.every((g) => {
-    const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
-    return !!guessResults[key];
-  });
 
   // Author sees live needles during guessing; everyone sees locked positions after reveal
   const extraNeedles = amIAuthor
