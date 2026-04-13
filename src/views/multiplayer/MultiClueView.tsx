@@ -13,7 +13,7 @@ import { Ellipsis } from "@/components/ui/ellipsis";
 
 function pickDials(totalRounds: number, selectedCategories: string[]): DialConfig[] {
   const pool = selectedCategories.length > 0
-    ? spectrumCards.filter((c) => selectedCategories.includes(c.category))
+    ? spectrumCards.filter((c) => c.category && selectedCategories.includes(c.category))
     : spectrumCards;
   const shuffled = [...pool].sort(() => Math.random() - 0.5);
   return shuffled.slice(0, Math.min(totalRounds, shuffled.length)).map((card) => ({
