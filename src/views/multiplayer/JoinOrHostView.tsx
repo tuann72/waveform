@@ -1,4 +1,4 @@
-import { useState, useRef } from "react";
+import { useState, useRef, useEffect } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { Button } from "@/components/ui/button";
@@ -14,6 +14,16 @@ export function JoinOrHostView() {
   const nameRef = useRef<HTMLInputElement>(null);
 
   const nameValid = mp.playerName.trim().length > 0;
+
+  // Pre-fill code from URL param (e.g. /?room=AB12CD)
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    const roomParam = params.get("room");
+    if (roomParam) {
+      setCode(roomParam.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6));
+      setShowJoin(true);
+    }
+  }, []);
 
   function requireName() {
     if (!nameValid) {

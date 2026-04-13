@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation } from "@/lib/liveblocks";
@@ -7,10 +7,12 @@ import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import { Ellipsis } from "@/components/ui/ellipsis";
 
 export function MultiResultsView() {
   const { goTo } = useGame();
-  const { mp } = useMultiplayer();
+  const { mp, clearRoom } = useMultiplayer();
+  const [leaving, setLeaving] = useState(false);
 
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const queue = useStorage((s) => s ? [...s.guessingQueue] : []) ?? [];
@@ -38,6 +40,44 @@ export function MultiResultsView() {
     while (queue.length > 0) queue.delete(0);
     // players LiveMap intentionally kept — preserves colors and host assignment
   }, []);
+
+  const leaveRoom = useMutation(({ storage }, leavingId: string, wasHost: boolean) => {
+    const players = storage.get("players");
+    players.delete(leavingId);
+    if (!wasHost) return;
+    if (players.size === 0) {
+      storage.set("phase", "lobby");
+      storage.set("currentGuessIndex", 0);
+      const pd = storage.get("playerDials");
+      for (const k of pd.keys()) pd.delete(k);
+      const cl = storage.get("playerClues");
+      for (const k of cl.keys()) cl.delete(k);
+      const res = storage.get("guessResults");
+      for (const k of res.keys()) res.delete(k);
+      const q = storage.get("guessingQueue");
+      while (q.length > 0) q.delete(0);
+    } else {
+      for (const [newHostId, newHostInfo] of players.entries()) {
+        players.set(newHostId, { ...newHostInfo, isHost: true });
+        storage.set("hostId", newHostId);
+        break;
+      }
+    }
+  }, []);
+
+  async function handleLeave() {
+    setLeaving(true);
+    if (mp.isHost && players.length <= 1) {
+      try {
+        await fetch(`/api/delete-room?roomId=waveform-${mp.roomCode}`, { method: "DELETE" });
+      } catch {}
+    } else {
+      leaveRoom(mp.playerId, mp.isHost);
+      await new Promise<void>((r) => setTimeout(r, 400));
+    }
+    clearRoom();
+    goTo("start");
+  }
 
   function handlePlayAgain() {
     resetForNewGame();
@@ -157,8 +197,11 @@ export function MultiResultsView() {
         {mp.isHost ? (
           <Button onClick={handlePlayAgain}>Play Again</Button>
         ) : (
-          <p className="text-sm text-center text-muted-foreground">Waiting for host to start a new game…</p>
+          <p className="text-sm text-center text-muted-foreground">Waiting for host to start a new game<Ellipsis /></p>
         )}
+        <Button variant="ghost" className="text-muted-foreground" onClick={handleLeave} disabled={leaving}>
+          {leaving ? "Leaving…" : "Leave Game"}
+        </Button>
       </div>
     </div>
   );

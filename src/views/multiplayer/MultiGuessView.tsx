@@ -6,6 +6,7 @@ import type { DialConfig } from "@/lib/liveblocks";
 import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
 import { calcPoints } from "@/lib/scoring";
+import { Ellipsis } from "@/components/ui/ellipsis";
 
 export function MultiGuessView() {
   const { goTo } = useGame();
@@ -91,7 +92,7 @@ export function MultiGuessView() {
   if (!queue.length || !currentEntry) {
     return (
       <div className="h-screen overflow-hidden flex items-center justify-center">
-        <p className="text-muted-foreground">Loading…</p>
+        <p className="text-muted-foreground">Loading<Ellipsis /></p>
       </div>
     );
   }
@@ -153,7 +154,7 @@ export function MultiGuessView() {
             card={dial}
             dialPosition={myDisplayPosition}
             onDialChange={amIGuesser && !myLocked ? handleDialChange : () => {}}
-            showTarget={allGuessersLocked}
+            showTarget={amIAuthor || allGuessersLocked}
             targetPosition={authorTarget}
             disabled={!amIGuesser || myLocked}
             hideNeedle={amIAuthor}
@@ -175,7 +176,7 @@ export function MultiGuessView() {
                 <div key={g.id} className="flex items-center gap-2 text-xs text-muted-foreground">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: g.color }} />
                   <span>{g.name}{g.id === mp.playerId ? " (you)" : ""}</span>
-                  <span className="ml-auto">{locked ? "Locked in" : "Guessing…"}</span>
+                  <span className="ml-auto">{locked ? "Locked in" : <>Guessing<Ellipsis /></>}</span>
                 </div>
               );
             })}
@@ -188,7 +189,7 @@ export function MultiGuessView() {
         )}
 
         {amIGuesser && myLocked && !allGuessersLocked && (
-          <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in…</p>
+          <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in<Ellipsis /></p>
         )}
 
         {allGuessersLocked && amIAuthor && (
@@ -196,11 +197,11 @@ export function MultiGuessView() {
         )}
 
         {allGuessersLocked && !amIAuthor && (
-          <p className="text-sm text-center text-muted-foreground">Waiting for {authorName} to continue…</p>
+          <p className="text-sm text-center text-muted-foreground">Waiting for {authorName} to continue<Ellipsis /></p>
         )}
 
         {amIAuthor && !allGuessersLocked && (
-          <p className="text-sm text-center text-muted-foreground">Watching guesses come in…</p>
+          <p className="text-sm text-center text-muted-foreground">Watching guesses come in<Ellipsis /></p>
         )}
       </div>
     </div>

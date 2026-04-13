@@ -74,10 +74,19 @@ export function MultiplayerProvider({ children }: { children: ReactNode }) {
       value={{
         mp,
         setPlayerName: (playerName) => setMp((s) => ({ ...s, playerName })),
-        hostRoom: () => setMp((s) => ({ ...s, roomCode: generateRoomCode(), isHost: true })),
-        joinRoom: (code) => setMp((s) => ({ ...s, roomCode: code.toUpperCase().slice(0, 6), isHost: false })),
+        hostRoom: () => {
+          const roomCode = generateRoomCode();
+          history.pushState({}, "", `?room=${roomCode}`);
+          setMp((s) => ({ ...s, roomCode, isHost: true }));
+        },
+        joinRoom: (code) => {
+          const roomCode = code.toUpperCase().slice(0, 6);
+          history.pushState({}, "", `?room=${roomCode}`);
+          setMp((s) => ({ ...s, roomCode, isHost: false }));
+        },
         clearRoom: () => {
           try { sessionStorage.removeItem(SESSION_KEY); } catch {}
+          history.pushState({}, "", "/");
           setMp((s) => ({ ...s, roomCode: "", isHost: false }));
         },
         setIsHost: (isHost) => setMp((s) => ({ ...s, isHost })),

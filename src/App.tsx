@@ -96,6 +96,7 @@ function MultiplayerRoom() {
         totalRounds: state.totalRounds,
         clueTimerDuration: 90,
         cluePhaseStartTime: null,
+        selectedCategories: [],
         hostId: mp.playerId,
         players: new LiveMap(),
         playerDials: new LiveMap(),
@@ -116,7 +117,12 @@ function MultiplayerRoom() {
 }
 
 function GameRouter() {
-  const { state } = useGame();
+  const { state, goTo } = useGame();
+
+  useEffect(() => {
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("room") && state.view === "start") goTo("joinOrHost");
+  }, []);
 
   if (ROOM_VIEWS.has(state.view)) return <MultiplayerRoom />;
 

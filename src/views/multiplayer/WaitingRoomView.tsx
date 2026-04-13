@@ -9,6 +9,8 @@ import { Separator } from "@/components/ui/separator";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Label } from "@/components/ui/label";
 import { ROUND_OPTIONS } from "@/types/game";
+import { CARD_CATEGORIES } from "@/data/spectrumCards";
+import { Ellipsis } from "@/components/ui/ellipsis";
 
 const MAX_PLAYERS = 12;
 
@@ -35,8 +37,9 @@ export function WaitingRoomView() {
   const totalRounds = useStorage((s) => s?.totalRounds ?? state.totalRounds);
   const gameMode = useStorage((s) => s?.gameMode ?? "classic");
   const clueTimerDuration = useStorage((s) => s?.clueTimerDuration ?? 90);
+  const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
 
-  const [copied, setCopied] = useState(false);
+  const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [leaving, setLeaving] = useState(false);
   const storageLoaded = useStorage((s) => s !== null);
   // Non-hosts navigate when phase changes lobby → clue.
@@ -90,10 +93,13 @@ export function WaitingRoomView() {
     if (phase === "clue" && seenLobby.current) goTo("multiClue");
   }, [phase]);
 
-  function handleCopy() {
-    navigator.clipboard.writeText(mp.roomCode).then(() => {
-      setCopied(true);
-      setTimeout(() => setCopied(false), 2000);
+  function handleCopy(type: "code" | "link") {
+    const text = type === "link"
+      ? `${window.location.origin}/?room=${mp.roomCode}`
+      : mp.roomCode;
+    navigator.clipboard.writeText(text).then(() => {
+      setCopied(type);
+      setTimeout(() => setCopied(null), 2000);
     });
   }
 
@@ -108,6 +114,18 @@ export function WaitingRoomView() {
   const setClueTimer = useMutation(({ storage }, duration: number) => {
     storage.set("clueTimerDuration", duration);
   }, []);
+
+  const setSelectedCategories = useMutation(({ storage }, cats: string[]) => {
+    storage.set("selectedCategories", cats);
+  }, []);
+
+  function toggleCategory(cat: string) {
+    if (!mp.isHost) return;
+    const next = selectedCategories.includes(cat)
+      ? selectedCategories.filter((c) => c !== cat)
+      : [...selectedCategories, cat];
+    setSelectedCategories(next);
+  }
 
   const startGame = useMutation(({ storage }) => {
     storage.set("cluePhaseStartTime", Date.now());
@@ -186,9 +204,14 @@ export function WaitingRoomView() {
           <p className="text-4xl font-mono font-bold tracking-[0.2em] text-foreground">
             {mp.roomCode}
           </p>
-          <Button variant="outline" size="sm" className="w-full" onClick={handleCopy}>
-            {copied ? "Copied!" : "Copy Code"}
-          </Button>
+          <div className="grid grid-cols-2 gap-2 w-full">
+            <Button variant="outline" size="sm" onClick={() => handleCopy("code")}>
+              {copied === "code" ? "Copied!" : "Copy Code"}
+            </Button>
+            <Button variant="outline" size="sm" onClick={() => handleCopy("link")}>
+              {copied === "link" ? "Copied!" : "Copy Link"}
+            </Button>
+          </div>
         </div>
 
         <Separator />
@@ -263,6 +286,43 @@ export function WaitingRoomView() {
           </Select>
         </div>
 
+        {/* Card categories */}
+        <div className="flex flex-col gap-2">
+          <div className="flex items-center justify-between">
+            <Label className="text-sm text-muted-foreground">Card Categories</Label>
+            <span className="text-xs text-muted-foreground">
+              {selectedCategories.length === 0 ? "All" : `${selectedCategories.length} selected`}
+            </span>
+          </div>
+          <div className="flex flex-wrap gap-1.5">
+            <button
+              onClick={() => mp.isHost && setSelectedCategories([])}
+              disabled={!mp.isHost}
+              className={`text-xs px-2.5 py-1 rounded-full border transition-colors cursor-pointer disabled:cursor-default ${
+                selectedCategories.length === 0
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:border-primary/40"
+              }`}
+            >
+              All
+            </button>
+            {CARD_CATEGORIES.map((cat) => (
+              <button
+                key={cat}
+                onClick={() => toggleCategory(cat)}
+                disabled={!mp.isHost}
+                className={`text-xs px-2.5 py-1 rounded-full border transition-colors cursor-pointer disabled:cursor-default ${
+                  selectedCategories.includes(cat)
+                    ? "border-primary bg-primary/10 text-foreground"
+                    : "border-border text-muted-foreground hover:border-primary/40"
+                }`}
+              >
+                {cat}
+              </button>
+            ))}
+          </div>
+        </div>
+
         <Separator />
 
         {/* Player list */}
@@ -287,7 +347,7 @@ export function WaitingRoomView() {
           ))}
           {playerCount < 2 && (
             <p className="text-xs text-muted-foreground mt-1">
-              Waiting for players to join…
+              Waiting for players to join<Ellipsis />
             </p>
           )}
           {!mp.isHost && playerCount >= MAX_PLAYERS && !players?.find(([id]) => id === mp.playerId) && (
@@ -301,7 +361,7 @@ export function WaitingRoomView() {
           </Button>
         ) : (
           <p className="text-sm text-center text-muted-foreground">
-            Waiting for host to start…
+            Waiting for host to start<Ellipsis />
           </p>
         )}
 

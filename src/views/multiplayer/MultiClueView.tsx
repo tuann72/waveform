@@ -9,10 +9,14 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { spectrumCards } from "@/data/spectrumCards";
+import { Ellipsis } from "@/components/ui/ellipsis";
 
-function pickDials(totalRounds: number): DialConfig[] {
-  const shuffled = [...spectrumCards].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, totalRounds).map((card) => ({
+function pickDials(totalRounds: number, selectedCategories: string[]): DialConfig[] {
+  const pool = selectedCategories.length > 0
+    ? spectrumCards.filter((c) => selectedCategories.includes(c.category))
+    : spectrumCards;
+  const shuffled = [...pool].sort(() => Math.random() - 0.5);
+  return shuffled.slice(0, Math.min(totalRounds, shuffled.length)).map((card) => ({
     id: card.id,
     left: card.left,
     right: card.right,
@@ -38,6 +42,7 @@ export function MultiClueView() {
   const phase = useStorage((s) => s?.phase);
   const clueTimerDuration = useStorage((s) => s?.clueTimerDuration ?? 90) ?? 90;
   const cluePhaseStartTime = useStorage((s) => s?.cluePhaseStartTime ?? null);
+  const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
 
   const myDials = playerDials[mp.playerId] ?? [];
 
@@ -93,12 +98,16 @@ export function MultiClueView() {
 
   // Builds the guessing queue from storage directly (reads fresh state inside mutation)
   const advanceToGuessing = useMutation(
-    ({ storage }, playerIds: string[], totalDials: number) => {
+    ({ storage }, playerIds: string[]) => {
       if (storage.get("phase") !== "clue") return;
+      const dialsMap = storage.get("playerDials");
       const cluesMap = storage.get("playerClues");
       const lb = storage.get("guessingQueue");
 
-      for (let d = 0; d < totalDials; d++) {
+      // Use actual dial counts per player (may be < totalRounds due to category filtering)
+      const maxDials = Math.max(...playerIds.map((id) => (dialsMap.get(id) ?? []).length), 0);
+
+      for (let d = 0; d < maxDials; d++) {
         for (const authorId of playerIds) {
           const authorClues = cluesMap.get(authorId) ?? [];
           if (authorClues[d]?.trim()) {
@@ -117,7 +126,7 @@ export function MultiClueView() {
   // Generate and store this player's random dials once
   useEffect(() => {
     if (!playerDials[mp.playerId]) {
-      savePlayerDials(mp.playerId, pickDials(totalRounds));
+      savePlayerDials(mp.playerId, pickDials(totalRounds, selectedCategories));
     }
   }, [totalRounds]);
 
@@ -134,7 +143,7 @@ export function MultiClueView() {
     if (!mp.isHost || !timerExpired || !players.length) return;
     const timer = setTimeout(() => {
       const allPlayerIds = players.map(([id]) => id);
-      advanceToGuessing(allPlayerIds, totalRounds);
+      advanceToGuessing(allPlayerIds);
     }, 2000);
     return () => clearTimeout(timer);
   }, [timerExpired, mp.isHost, players.length]);
@@ -150,13 +159,14 @@ export function MultiClueView() {
   useEffect(() => {
     if (!mp.isHost || !players.length || timerExpired) return;
     const allPlayerIds = players.map(([id]) => id);
-    const allReady = allPlayerIds.every((id) =>
-      (playerDials[id]?.length ?? 0) >= totalRounds &&
-      (playerClues[id]?.length ?? 0) >= totalRounds &&
-      playerClues[id]?.every((c) => c.trim()),
-    );
+    const allReady = allPlayerIds.every((id) => {
+      const dialCount = playerDials[id]?.length ?? 0;
+      return dialCount > 0 &&
+        (playerClues[id]?.length ?? 0) >= dialCount &&
+        playerClues[id]?.every((c) => c.trim());
+    });
     if (allReady) {
-      advanceToGuessing(allPlayerIds, totalRounds);
+      advanceToGuessing(allPlayerIds);
     }
   }, [playerClues, playerDials]);
 
@@ -178,7 +188,7 @@ export function MultiClueView() {
   if (!myDials.length) {
     return (
       <div className="min-h-screen flex items-center justify-center">
-        <p className="text-muted-foreground">Loading…</p>
+        <p className="text-muted-foreground">Loading<Ellipsis /></p>
       </div>
     );
   }
@@ -295,7 +305,7 @@ export function MultiClueView() {
           <div className="text-center text-sm text-muted-foreground py-2">
             {timerExpired && !hasSubmitted
               ? "Time's up! Your clues have been saved."
-              : "Clues submitted! Waiting for others…"}
+              : <>Clues submitted! Waiting for others<Ellipsis /></>}
           </div>
         )}
 
@@ -314,7 +324,7 @@ export function MultiClueView() {
                   <span>{info.name}{id === mp.playerId ? " (you)" : ""}</span>
                 </div>
                 <Badge variant={fullyDone ? "default" : "outline"}>
-                  {fullyDone ? "Ready" : partial ? "Partial" : "Writing…"}
+                  {fullyDone ? "Ready" : partial ? "Partial" : <>Writing<Ellipsis /></>}
                 </Badge>
               </div>
             );

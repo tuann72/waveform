@@ -42,6 +42,7 @@ export type Storage = {
   totalRounds: number;
   clueTimerDuration: number;      // seconds; 0 = no limit
   cluePhaseStartTime: number | null;
+  selectedCategories: string[];   // empty = all categories
   hostId: string;
   players: LiveMap<string, PlayerInfo>;
   playerDials: LiveMap<string, DialConfig[]>;
