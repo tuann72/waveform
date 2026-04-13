@@ -24,6 +24,7 @@ export function MultiGuessView() {
 
   const [dialPosition, setDialPosition] = useState(50);
   const [dialResetFor, setDialResetFor] = useState<number | null>(null);
+  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
 
   const currentEntry = queue[currentGuessIndex ?? 0];
   const amIAuthor = currentEntry?.authorId === mp.playerId;
@@ -56,6 +57,23 @@ export function MultiGuessView() {
     document.body.style.overflow = "hidden";
     return () => { document.body.style.overflow = ""; };
   }, []);
+
+  // Start 12s countdown when all guessers lock in; author auto-advances at 0
+  useEffect(() => {
+    if (!allGuessersLocked) {
+      setAutoAdvanceTimer(null);
+      return;
+    }
+    setAutoAdvanceTimer(12);
+    const interval = setInterval(() => {
+      setAutoAdvanceTimer((t) => (t !== null && t > 0 ? t - 1 : 0));
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [allGuessersLocked, currentGuessIndex]);
+
+  useEffect(() => {
+    if (autoAdvanceTimer === 0 && amIAuthor) advanceGuess();
+  }, [autoAdvanceTimer]);
 
   function handleDialChange(pos: number) {
     setDialPosition(pos);
@@ -112,7 +130,7 @@ export function MultiGuessView() {
     return !!guessResults[key];
   });
 
-  // Extra needles for author view
+  // Author sees live needles during guessing; everyone sees locked positions after reveal
   const extraNeedles = amIAuthor
     ? guessers.map((g) => {
         const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
@@ -121,7 +139,12 @@ export function MultiGuessView() {
         const other = others.find((o) => o.presence?.playerId === g.id);
         return { position: other?.presence?.dialPosition ?? 50, color: g.color };
       })
-    : [];
+    : allGuessersLocked
+      ? guessers.map((g) => {
+          const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+          return { position: guessResults[key]?.position ?? 50, color: g.color };
+        })
+      : [];
 
   const myDisplayPosition = myLocked ? myResult!.position : dialPosition;
   const progress = `${(currentGuessIndex ?? 0) + 1} / ${queue.length}`;
@@ -171,12 +194,20 @@ export function MultiGuessView() {
           <div className="flex flex-col gap-1">
             {guessers.map((g) => {
               const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
-              const locked = !!guessResults[key];
+              const result = guessResults[key];
+              const locked = !!result;
               return (
-                <div key={g.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                <div key={g.id} className="flex items-center gap-2 text-xs">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: g.color }} />
-                  <span>{g.name}{g.id === mp.playerId ? " (you)" : ""}</span>
-                  <span className="ml-auto">{locked ? "Locked in" : <>Guessing<Ellipsis /></>}</span>
+                  <span className="text-muted-foreground">{g.name}{g.id === mp.playerId ? " (you)" : ""}</span>
+                  <span className="ml-auto">
+                    {allGuessersLocked && result
+                      ? <span className="font-semibold text-foreground">+{result.points} pt{result.points !== 1 ? "s" : ""}</span>
+                      : locked
+                        ? <span className="text-muted-foreground">Locked in</span>
+                        : <span className="text-muted-foreground"><>Guessing<Ellipsis /></></span>
+                    }
+                  </span>
                 </div>
               );
             })}
@@ -193,11 +224,21 @@ export function MultiGuessView() {
         )}
 
         {allGuessersLocked && amIAuthor && (
-          <Button onClick={() => advanceGuess()}>Next</Button>
+          <div className="flex items-center gap-3">
+            <Button className="flex-1" onClick={() => advanceGuess()}>Next</Button>
+            {autoAdvanceTimer !== null && autoAdvanceTimer > 0 && (
+              <span className="text-sm text-muted-foreground tabular-nums w-6 text-center">{autoAdvanceTimer}</span>
+            )}
+          </div>
         )}
 
         {allGuessersLocked && !amIAuthor && (
-          <p className="text-sm text-center text-muted-foreground">Waiting for {authorName} to continue<Ellipsis /></p>
+          <p className="text-sm text-center text-muted-foreground">
+            Waiting for {authorName} to continue
+            {autoAdvanceTimer !== null && autoAdvanceTimer > 0 && (
+              <span className="ml-1 tabular-nums">({autoAdvanceTimer})</span>
+            )}
+          </p>
         )}
 
         {amIAuthor && !allGuessersLocked && (

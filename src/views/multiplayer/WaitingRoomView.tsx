@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { motion } from "motion/react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation } from "@/lib/liveblocks";
@@ -190,16 +191,27 @@ export function WaitingRoomView() {
   const playerCount = players?.length ?? 0;
   const canStart = mp.isHost && playerCount >= 2;
 
+  const item = {
+    hidden: { opacity: 0, y: 12 },
+    show: { opacity: 1, y: 0, transition: { duration: 0.3, ease: "easeOut" } },
+  };
+
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4">
-      <div className="w-full max-w-xs flex flex-col gap-6">
-        <div className="text-center">
+      <motion.div
+        className="w-full max-w-xs flex flex-col gap-6"
+        initial="hidden"
+        animate="show"
+        variants={{ show: { transition: { staggerChildren: 0.07 } } }}
+      >
+        {/* Header */}
+        <motion.div variants={item} className="text-center">
           <h2 className="text-xl font-semibold">Waiting Room</h2>
           <p className="text-sm text-muted-foreground mt-1">Share the code with friends</p>
-        </div>
+        </motion.div>
 
         {/* Room code */}
-        <div className="rounded-xl border bg-muted/40 px-6 py-4 flex flex-col items-center gap-3">
+        <motion.div variants={item} className="rounded-xl border bg-muted/40 px-6 py-4 flex flex-col items-center gap-3">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Room Code</p>
           <p className="text-4xl font-mono font-bold tracking-[0.2em] text-foreground">
             {mp.roomCode}
@@ -212,12 +224,12 @@ export function WaitingRoomView() {
               {copied === "link" ? "Copied!" : "Copy Link"}
             </Button>
           </div>
-        </div>
+        </motion.div>
 
-        <Separator />
+        <motion.div variants={item}><Separator /></motion.div>
 
         {/* Game mode selection */}
-        <div className="flex flex-col gap-3">
+        <motion.div variants={item} className="flex flex-col gap-3">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Game Mode</p>
           <div className="grid grid-cols-2 gap-2">
             <button
@@ -246,10 +258,10 @@ export function WaitingRoomView() {
           {!mp.isHost && (
             <p className="text-xs text-muted-foreground text-center">Only the host can change settings</p>
           )}
-        </div>
+        </motion.div>
 
         {/* Rounds */}
-        <div className="flex items-center gap-3">
+        <motion.div variants={item} className="flex items-center gap-3">
           <Label className="text-sm text-muted-foreground whitespace-nowrap flex-1">Rounds</Label>
           <Select
             value={String(totalRounds ?? 3)}
@@ -265,10 +277,10 @@ export function WaitingRoomView() {
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </motion.div>
 
         {/* Clue timer */}
-        <div className="flex items-center gap-3">
+        <motion.div variants={item} className="flex items-center gap-3">
           <Label className="text-sm text-muted-foreground whitespace-nowrap flex-1">Clue Timer</Label>
           <Select
             value={String(clueTimerDuration ?? 90)}
@@ -284,10 +296,10 @@ export function WaitingRoomView() {
               ))}
             </SelectContent>
           </Select>
-        </div>
+        </motion.div>
 
         {/* Card categories */}
-        <div className="flex flex-col gap-2">
+        <motion.div variants={item} className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm text-muted-foreground">Card Categories</Label>
             <span className="text-xs text-muted-foreground">
@@ -321,12 +333,12 @@ export function WaitingRoomView() {
               </button>
             ))}
           </div>
-        </div>
+        </motion.div>
 
-        <Separator />
+        <motion.div variants={item}><Separator /></motion.div>
 
         {/* Player list */}
-        <div className="flex flex-col gap-2">
+        <motion.div variants={item} className="flex flex-col gap-2">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">
             Players ({playerCount})
           </p>
@@ -353,22 +365,26 @@ export function WaitingRoomView() {
           {!mp.isHost && playerCount >= MAX_PLAYERS && !players?.find(([id]) => id === mp.playerId) && (
             <p className="text-xs text-destructive mt-1">Room is full (max {MAX_PLAYERS} players).</p>
           )}
-        </div>
+        </motion.div>
 
         {mp.isHost ? (
-          <Button onClick={handleStart} disabled={!canStart}>
-            {canStart ? "Start Game" : "Waiting for players…"}
-          </Button>
+          <motion.div variants={item}>
+            <Button className="w-full" onClick={handleStart} disabled={!canStart}>
+              {canStart ? "Start Game" : "Waiting for players…"}
+            </Button>
+          </motion.div>
         ) : (
-          <p className="text-sm text-center text-muted-foreground">
+          <motion.p variants={item} className="text-sm text-center text-muted-foreground">
             Waiting for host to start<Ellipsis />
-          </p>
+          </motion.p>
         )}
 
-        <Button variant="ghost" className="text-muted-foreground" onClick={handleLeave} disabled={leaving}>
-          {leaving ? "Leaving…" : "Leave Room"}
-        </Button>
-      </div>
+        <motion.div variants={item}>
+          <Button variant="ghost" className="w-full text-muted-foreground" onClick={handleLeave} disabled={leaving}>
+            {leaving ? "Leaving…" : "Leave Room"}
+          </Button>
+        </motion.div>
+      </motion.div>
     </div>
   );
 }

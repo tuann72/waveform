@@ -13,6 +13,7 @@ export function MultiResultsView() {
   const { goTo } = useGame();
   const { mp, clearRoom } = useMultiplayer();
   const [leaving, setLeaving] = useState(false);
+  const [breakdownView, setBreakdownView] = useState<"round" | "player">("round");
 
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const queue = useStorage((s) => s ? [...s.guessingQueue] : []) ?? [];
@@ -143,8 +144,25 @@ export function MultiResultsView() {
 
         {/* Round breakdown */}
         <div className="flex flex-col gap-3">
-          <p className="text-xs uppercase tracking-widest text-muted-foreground">Round Breakdown</p>
-          {breakdownEntries.map(({ dialIndex, authorId }) => {
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Round Breakdown</p>
+            <div className="flex rounded-lg border overflow-hidden text-xs">
+              <button
+                onClick={() => setBreakdownView("round")}
+                className={`px-3 py-1 transition-colors cursor-pointer ${breakdownView === "round" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+              >
+                By Round
+              </button>
+              <button
+                onClick={() => setBreakdownView("player")}
+                className={`px-3 py-1 transition-colors cursor-pointer ${breakdownView === "player" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted"}`}
+              >
+                By Player
+              </button>
+            </div>
+          </div>
+
+          {breakdownView === "round" && breakdownEntries.map(({ dialIndex, authorId }) => {
             const dial = playerDials[authorId]?.[dialIndex];
             const authorInfo = players.find(([id]) => id === authorId)?.[1];
             const authorName = authorInfo?.name ?? "?";
@@ -163,7 +181,6 @@ export function MultiResultsView() {
                   </div>
                   <p className="text-sm font-medium">"{clue}"</p>
                 </div>
-
                 {dial && (
                   <SpectrumDial
                     card={dial}
@@ -176,7 +193,6 @@ export function MultiResultsView() {
                     extraNeedles={extraNeedles}
                   />
                 )}
-
                 <div className="flex flex-wrap gap-2">
                   {guessers.map(([gid, ginfo]) => {
                     const res = guessResults[`${gid}-${dialIndex}-${authorId}`];
@@ -189,6 +205,65 @@ export function MultiResultsView() {
                     );
                   })}
                 </div>
+              </div>
+            );
+          })}
+
+          {breakdownView === "player" && ranked.map(([playerId, playerInfo]) => {
+            const myGuesses = breakdownEntries
+              .filter(({ authorId }) => authorId !== playerId)
+              .map(({ dialIndex, authorId }) => {
+                const key = `${playerId}-${dialIndex}-${authorId}`;
+                const result = guessResults[key];
+                if (!result) return null;
+                const dial = playerDials[authorId]?.[dialIndex];
+                const authorInfo = players.find(([id]) => id === authorId)?.[1];
+                const clue = playerClues[authorId]?.[dialIndex] ?? "";
+                return { dialIndex, authorId, result, dial, authorInfo, clue };
+              })
+              .filter(Boolean) as {
+                dialIndex: number; authorId: string;
+                result: { position: number; points: number };
+                dial: DialConfig | undefined;
+                authorInfo: { name: string; color: string } | undefined;
+                clue: string;
+              }[];
+
+            return (
+              <div key={playerId} className="rounded-lg border p-3 flex flex-col gap-3">
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full" style={{ background: playerInfo.color }} />
+                    <span className="text-sm font-medium">{playerInfo.name}{playerId === mp.playerId ? " (you)" : ""}</span>
+                  </div>
+                  <span className="text-sm font-bold">{scoreMap[playerId] ?? 0} pts</span>
+                </div>
+                {myGuesses.map(({ dialIndex, authorId, result, dial, authorInfo, clue }) => (
+                  <div key={`${dialIndex}-${authorId}`} className="flex flex-col gap-1.5 pl-4 border-l-2" style={{ borderColor: playerInfo.color + "60" }}>
+                    <div className="flex items-center justify-between text-xs text-muted-foreground">
+                      <div className="flex items-center gap-1">
+                        {authorInfo && <span className="w-1.5 h-1.5 rounded-full" style={{ background: authorInfo.color }} />}
+                        <span>{authorInfo?.name ?? "?"}'s clue: "{clue}"</span>
+                      </div>
+                      <span className="font-semibold text-foreground">+{result.points} pt{result.points !== 1 ? "s" : ""}</span>
+                    </div>
+                    {dial && (
+                      <SpectrumDial
+                        card={dial}
+                        dialPosition={result.position}
+                        onDialChange={() => {}}
+                        showTarget={true}
+                        targetPosition={dial.targetPosition}
+                        disabled={true}
+                        hideNeedle={false}
+                        smooth={true}
+                      />
+                    )}
+                  </div>
+                ))}
+                {myGuesses.length === 0 && (
+                  <p className="text-xs text-muted-foreground pl-4">No guesses recorded</p>
+                )}
               </div>
             );
           })}
