@@ -1,4 +1,4 @@
-import { createClient, LiveList, LiveMap } from "@liveblocks/client";
+import { createClient, LiveList, LiveMap, LiveObject } from "@liveblocks/client";
 import { createRoomContext } from "@liveblocks/react";
 
 export type RoomPhase = "lobby" | "clue" | "guessing" | "results";
@@ -51,6 +51,22 @@ export type Storage = {
   currentGuessIndex: number;
   guessResults: LiveMap<string, GuessResult>;
 };
+
+// Clears all per-game data from storage. Does NOT touch players, gameMode,
+// totalRounds, clueTimerDuration, selectedCategories, or hostId.
+// Call this inside any mutation that needs to reset between games.
+export function clearGameData(storage: LiveObject<Storage>) {
+  storage.set("phase", "lobby");
+  storage.set("currentGuessIndex", 0);
+  const playerDials = storage.get("playerDials");
+  for (const k of playerDials.keys()) playerDials.delete(k);
+  const playerClues = storage.get("playerClues");
+  for (const k of playerClues.keys()) playerClues.delete(k);
+  const guessResults = storage.get("guessResults");
+  for (const k of guessResults.keys()) guessResults.delete(k);
+  const guessingQueue = storage.get("guessingQueue");
+  while (guessingQueue.length > 0) guessingQueue.delete(0);
+}
 
 const client = createClient({
   publicApiKey: import.meta.env.VITE_LIVEBLOCKS_PUBLIC_KEY,

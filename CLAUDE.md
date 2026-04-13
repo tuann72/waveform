@@ -42,7 +42,8 @@ src/
 │   ├── GameContext.tsx                  ← minimal view router + totalRounds state
 │   └── MultiplayerContext.tsx           ← session-persisted local state (name, roomCode, playerId, isHost)
 ├── hooks/
-│   └── useDialDrag.ts                   ← pointer-capture drag (mouse + touch)
+│   ├── useDialDrag.ts                   ← pointer-capture drag (mouse + touch)
+│   └── useLeaveRoom.ts                  ← shared leave logic (leaveRoom mutation + handleLeave) used by WaitingRoom + Results
 ├── lib/
 │   ├── liveblocks.ts                    ← Liveblocks client + Storage/Presence types + typed hooks
 │   ├── scoring.ts                       ← calcPoints(dial, target): number
@@ -53,8 +54,7 @@ src/
 │   │   ├── ellipsis.tsx                 ← animated cycling ellipsis (. → .. → ...) at 500ms
 │   │   └── badge, button, card, input, label, select, separator
 │   └── game/
-│       ├── SpectrumDial.tsx             ← interactive spectrum dial; supports extraNeedles (colored, for multi-player reveal)
-│       └── ScoreDisplay.tsx             ← score + round counter (available, not currently used)
+│       └── SpectrumDial.tsx             ← interactive spectrum dial; supports extraNeedles (colored, for multi-player reveal)
 └── views/
     ├── StartView.tsx                    ← animated gradient, light/dark toggle (top-right), Play → joinOrHost
     └── multiplayer/
@@ -163,6 +163,8 @@ export type Presence = {
 ```
 
 **Room ID:** `waveform-${roomCode}`
+
+**`clearGameData(storage)`** — exported helper that resets all per-game state (phase → lobby, currentGuessIndex → 0, clears playerDials/playerClues/guessResults/guessingQueue). Does NOT touch players, gameMode, totalRounds, clueTimerDuration, selectedCategories, or hostId. Used in `initRoom` (WaitingRoom), `resetForNewGame` (Results), and `leaveRoom` (useLeaveRoom hook).
 
 **Hooks exported:** `RoomProvider`, `useStorage`, `useMutation`, `useOthers`, `useSelf`, `useMyPresence`, `useUpdateMyPresence`
 
@@ -302,7 +304,7 @@ export function calcPoints(dial: number, target: number): number {
 - Each player sees their own dials with target visible (`hideNeedle=true`) and writes one clue per dial
 - Host watches `playerClues` + `playerDials`; when every player has all clues non-empty (using actual dial counts), advances to guessing
 - Progress indicator shows "Round X of Y" only — no submitted count (players see status in the player list below)
-- **Clue timer**: configurable in WaitingRoom (30s / 1min / 90s / 2min / No limit). Default: 90s. Scales by `totalRounds` (`effectiveTimerDuration = clueTimerDuration * totalRounds`). Timer is timestamp-based (`Date.now() - cluePhaseStartTime`) so it survives page refreshes. When timer expires, each client auto-saves their partial local clues to storage, then host waits 2s (grace period) and advances. Only (player, dial) pairs with a non-empty clue are included in the guessing queue — players who wrote nothing are skipped.
+- **Clue timer**: configurable in WaitingRoom (30s / 1min / 90s / 2min / No limit). Default: 90s. Scales by `totalRounds` (`effectiveTimerDuration = clueTimerDuration * totalRounds`). Timer is timestamp-based (`Date.now() - cluePhaseStartTime`) so it survives page refreshes. When timer expires, each client auto-saves their partial local clues to storage and sets `presence.cluesComplete = true`; host advances immediately when all connected others signal completion, with a 5s fallback for disconnected clients. Only (player, dial) pairs with a non-empty clue are included in the guessing queue — players who wrote nothing are skipped.
 - Timer bar color: green → amber (≤30%) → red (≤10%)
 
 **Guessing queue format** — one entry per (dial, author) pair with a non-empty clue:
@@ -325,7 +327,7 @@ for each dial d:
 - **Guesser view:** own white needle only (no extra needles until `allGuessersLocked`); `smooth={false}` for instant drag feedback
 - Live needle positions broadcast via `presence.dialPosition` → `useUpdateMyPresence` on every drag
 - `showTarget` reveals for everyone after **all guessers** have locked in (`allGuessersLocked`)
-- After locking in, each guesser sees the status list (who else is still guessing) — condition: `amIAuthor || myLocked || allGuessersLocked`
+- After locking in, each guesser sees the status list (who else is still guessing) — condition: `amIAuthor || amILocked || allGuessersLocked`
 - Each guesser locks in independently via `recordGuess` mutation
 - When `allGuessersLocked` → zones + all needle positions reveal; author sees score preview (`+N pts`) per guesser; author clicks **Next** → `advanceGuess` mutation
 - **Double-advance prevention:** `isAdvancing` ref (reset on `currentGuessIndex` change) guards both the manual Next button (`handleAdvance`) and the auto-advance timer effect
@@ -338,8 +340,8 @@ for each dial d:
 - **Round Breakdown toggle:** "By Round" (default) or "By Player" — toggles `breakdownView` state
   - By Round: each (dial, author) card with full SpectrumDial + extraNeedles + per-guesser score row
   - By Player: per-player card with colored left border; each guess shows dial with their needle + target + `+N pts`
-- **Play Again** (host only): `resetForNewGame` mutation clears game data but **keeps `players` LiveMap** (colors + host preserved) → sets `phase="lobby"` → host navigates to waitingRoom; non-hosts follow via `phase` watch
-- **Leave Game** button: same logic as WaitingRoom leave (delete room if last player, otherwise `leaveRoom` mutation + 400ms delay)
+- **Play Again** (host only): `resetForNewGame` mutation calls `clearGameData(storage)` but **keeps `players` LiveMap** (colors + host preserved) → sets `phase="lobby"` → host navigates to waitingRoom; non-hosts follow via `phase` watch
+- **Leave Game** button: uses shared `useLeaveRoom` hook (same logic as WaitingRoom leave)
 
 ---
 
@@ -425,6 +427,7 @@ export const CARD_CATEGORIES = ["Physical", "Personality", "Society", "Opinion",
 - **`useMutation` before `useEffect`:** Any `useMutation` result used inside a `useEffect` must be declared before the effect to avoid "used before declaration" TS errors (block-scoped `const` is not hoisted). Keep all mutations at the top of the component, above effects.
 - **Motion `Variants` type:** Must be explicitly annotated at module level (`const item: Variants = { ... }`), not inferred inside JSX return — otherwise TS can't resolve the type.
 - **`DialConfig` vs `SpectrumCard`:** `DialConfig` adds `targetPosition` but lacks `category`. `SpectrumCard.category` is optional so both types are compatible as `card` prop on `SpectrumDial`.
+- **`useStorage` always returns `null` during loading:** Even if the selector returns a default (e.g. `s?.selectedCategories ?? []`), the hook itself returns `null` before storage syncs. Always add `?? fallback` after the `useStorage(...)` call for any value used before `storageLoaded` is true (e.g. `useStorage((s) => s?.selectedCategories ?? []) ?? []`).
 
 ---
 

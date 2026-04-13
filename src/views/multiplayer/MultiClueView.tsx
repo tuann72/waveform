@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
-import { useStorage, useMutation, useUpdateMyPresence } from "@/lib/liveblocks";
+import { useStorage, useMutation, useOthers, useUpdateMyPresence } from "@/lib/liveblocks";
 import type { DialConfig } from "@/lib/liveblocks";
 import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
@@ -11,12 +11,20 @@ import { Separator } from "@/components/ui/separator";
 import { spectrumCards } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
 
+function shuffle<T>(arr: T[]): T[] {
+  const a = [...arr];
+  for (let i = a.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
 function pickDials(totalRounds: number, selectedCategories: string[]): DialConfig[] {
   const pool = selectedCategories.length > 0
     ? spectrumCards.filter((c) => c.category && selectedCategories.includes(c.category))
     : spectrumCards;
-  const shuffled = [...pool].sort(() => Math.random() - 0.5);
-  return shuffled.slice(0, Math.min(totalRounds, shuffled.length)).map((card) => ({
+  return shuffle(pool).slice(0, Math.min(totalRounds, pool.length)).map((card) => ({
     id: card.id,
     left: card.left,
     right: card.right,
@@ -37,6 +45,7 @@ export function MultiClueView() {
 
   const totalRounds = useStorage((s) => s?.totalRounds ?? 3) ?? 3;
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
+  const others = useOthers();
   const playerDials = useStorage((s) => s ? s.playerDials as Record<string, DialConfig[]> : {} as Record<string, DialConfig[]>) ?? {};
   const playerClues = useStorage((s) => s ? s.playerClues as Record<string, string[]> : {} as Record<string, string[]>) ?? {};
   const phase = useStorage((s) => s?.phase);
@@ -138,15 +147,19 @@ export function MultiClueView() {
     updatePresence({ cluesComplete: true });
   }, [timerExpired]);
 
-  // Host waits 2s (grace period for saves to propagate) then advances
+  // Host advances when all connected players signal clue completion via presence.
+  // Falls back to 5s in case a client disconnects without setting presence.
   useEffect(() => {
     if (!mp.isHost || !timerExpired || !players.length) return;
-    const timer = setTimeout(() => {
-      const allPlayerIds = players.map(([id]) => id);
+    const allPlayerIds = players.map(([id]) => id);
+    const allComplete = others.every((o) => o.presence?.cluesComplete === true);
+    if (allComplete) {
       advanceToGuessing(allPlayerIds);
-    }, 2000);
+      return;
+    }
+    const timer = setTimeout(() => advanceToGuessing(allPlayerIds), 5000);
     return () => clearTimeout(timer);
-  }, [timerExpired, mp.isHost, players.length]);
+  }, [timerExpired, mp.isHost, players, others]);
 
   function handleSubmitAll() {
     if (clues.some((c) => !c.trim())) return;
@@ -168,7 +181,7 @@ export function MultiClueView() {
     if (allReady) {
       advanceToGuessing(allPlayerIds);
     }
-  }, [playerClues, playerDials]);
+  }, [playerClues, playerDials, players]);
 
   const myCluesSubmitted = hasSubmitted || timerExpired;
 

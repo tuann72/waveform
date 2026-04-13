@@ -2,8 +2,9 @@ import { useEffect, useRef, useState } from "react";
 import { motion, type Variants } from "motion/react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
-import { useStorage, useMutation } from "@/lib/liveblocks";
+import { useStorage, useMutation, clearGameData } from "@/lib/liveblocks";
 import type { GameMode } from "@/lib/liveblocks";
+import { useLeaveRoom } from "@/hooks/useLeaveRoom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
@@ -14,6 +15,8 @@ import { CARD_CATEGORIES } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
 
 const MAX_PLAYERS = 12;
+const COPY_FEEDBACK_MS = 2000;
+const NO_HOST_TIMEOUT_MS = 8000;
 
 const TIMER_OPTIONS = [
   { value: 30, label: "30s" },
@@ -36,7 +39,7 @@ const item: Variants = {
 
 export function WaitingRoomView() {
   const { state, goTo } = useGame();
-  const { mp, clearRoom } = useMultiplayer();
+  const { mp } = useMultiplayer();
 
   const phase = useStorage((s) => s?.phase);
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
@@ -46,8 +49,9 @@ export function WaitingRoomView() {
   const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
 
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
-  const [leaving, setLeaving] = useState(false);
+  const [noHostFound, setNoHostFound] = useState(false);
   const storageLoaded = useStorage((s) => s !== null);
+  const { leaving, handleLeave } = useLeaveRoom();
   // Non-hosts navigate when phase changes lobby → clue.
   // Hosts NEVER navigate via this effect — they use the Start Game button.
   const seenLobby = useRef(false);
@@ -58,16 +62,7 @@ export function WaitingRoomView() {
     // Already registered — reconnecting mid-game or returning after play again; leave state intact
     if (players.has(id)) return;
     // New host or stale room from a previous session — full reset
-    storage.set("phase", "lobby");
-    storage.set("currentGuessIndex", 0);
-    const playerDials = storage.get("playerDials");
-    for (const k of playerDials.keys()) playerDials.delete(k);
-    const clues = storage.get("playerClues");
-    for (const k of clues.keys()) clues.delete(k);
-    const results = storage.get("guessResults");
-    for (const k of results.keys()) results.delete(k);
-    const queue = storage.get("guessingQueue");
-    while (queue.length > 0) queue.delete(0);
+    clearGameData(storage);
     for (const k of players.keys()) players.delete(k);
     players.set(id, { name, isHost: true, color: PLAYER_COLORS[0] });
   }, []);
@@ -99,13 +94,23 @@ export function WaitingRoomView() {
     if (phase === "clue" && seenLobby.current) goTo("multiClue");
   }, [phase]);
 
+  // Warn non-hosts if no host appears after a timeout — likely a bad room code
+  useEffect(() => {
+    if (!storageLoaded || mp.isHost) return;
+    const timer = setTimeout(() => {
+      const hasHost = players.some(([, info]) => info.isHost);
+      if (!hasHost) setNoHostFound(true);
+    }, NO_HOST_TIMEOUT_MS);
+    return () => clearTimeout(timer);
+  }, [storageLoaded]);
+
   function handleCopy(type: "code" | "link") {
     const text = type === "link"
       ? `${window.location.origin}/?room=${mp.roomCode}`
       : mp.roomCode;
     navigator.clipboard.writeText(text).then(() => {
       setCopied(type);
-      setTimeout(() => setCopied(null), 2000);
+      setTimeout(() => setCopied(null), COPY_FEEDBACK_MS);
     });
   }
 
@@ -145,56 +150,6 @@ export function WaitingRoomView() {
   function handleStart() {
     startGame();
     goTo("multiClue");
-  }
-
-  // Removes the leaving player from storage and handles host succession/cleanup
-  const leaveRoom = useMutation(({ storage }, leavingId: string, wasHost: boolean) => {
-    const players = storage.get("players");
-    players.delete(leavingId);
-
-    if (!wasHost) return;
-
-    if (players.size === 0) {
-      // No one left — reset to a clean slate so the room code can be reused
-      storage.set("phase", "lobby");
-      storage.set("currentGuessIndex", 0);
-      const pd = storage.get("playerDials");
-      for (const k of pd.keys()) pd.delete(k);
-      const cl = storage.get("playerClues");
-      for (const k of cl.keys()) cl.delete(k);
-      const res = storage.get("guessResults");
-      for (const k of res.keys()) res.delete(k);
-      const q = storage.get("guessingQueue");
-      while (q.length > 0) q.delete(0);
-    } else {
-      // Promote the first remaining player to host
-      for (const [newHostId, newHostInfo] of players.entries()) {
-        players.set(newHostId, { ...newHostInfo, isHost: true });
-        storage.set("hostId", newHostId);
-        break;
-      }
-    }
-  }, []);
-
-  async function handleLeave() {
-    setLeaving(true);
-
-    if (mp.isHost && playerCount <= 1) {
-      // Last player — delete the room from Liveblocks entirely via server-side API
-      try {
-        await fetch(`/api/delete-room?roomId=waveform-${mp.roomCode}`, { method: 'DELETE' });
-      } catch {
-        // best effort — navigate regardless
-      }
-    } else {
-      // Remove self from storage and promote next host if needed,
-      // then wait for the mutation to sync before disconnecting
-      leaveRoom(mp.playerId, mp.isHost);
-      await new Promise<void>((r) => setTimeout(r, 400));
-    }
-
-    clearRoom();
-    goTo("start");
   }
 
   const playerCount = players?.length ?? 0;
@@ -340,6 +295,14 @@ export function WaitingRoomView() {
         </motion.div>
 
         <motion.div variants={item}><Separator /></motion.div>
+
+        {/* No-host warning — shown to non-hosts when no host appears after timeout */}
+        {noHostFound && (
+          <motion.div variants={item} className="rounded-lg border border-destructive/50 bg-destructive/10 px-4 py-3 text-sm text-destructive">
+            No host found. The room code may be invalid.{" "}
+            <button onClick={handleLeave} className="underline cursor-pointer">Leave room</button>
+          </motion.div>
+        )}
 
         {/* Player list */}
         <motion.div variants={item} className="flex flex-col gap-2">

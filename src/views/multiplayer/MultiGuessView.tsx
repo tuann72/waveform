@@ -55,7 +55,7 @@ export function MultiGuessView() {
 
   const advanceGuess = useMutation(
     ({ storage }) => {
-      const current = storage.get("currentGuessIndex") as unknown as number;
+      const current = storage.get("currentGuessIndex");
       const nextIndex = current + 1;
       const queueLen = storage.get("guessingQueue").length;
       storage.set("currentGuessIndex", nextIndex);
@@ -139,16 +139,18 @@ export function MultiGuessView() {
     ? `${mp.playerId}-${currentEntry.dialIndex}-${currentEntry.authorId}`
     : null;
   const myResult = myResultKey ? guessResults[myResultKey] : undefined;
-  const myLocked = !!myResult;
+  const amILocked = !!myResult;
 
-  // Author sees live needles during guessing; everyone sees locked positions after reveal
+  // Author sees live needles during guessing; everyone sees locked positions after reveal.
+  // Pending guessers (dialPosition === null) are omitted from extraNeedles so the author
+  // can distinguish "hasn't started yet" from "guessed at center".
   const extraNeedles = amIAuthor
-    ? guessers.map((g) => {
+    ? guessers.flatMap((g) => {
         const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
         const result = guessResults[key];
-        if (result) return { position: result.position, color: g.color };
-        const other = others.find((o) => o.presence?.playerId === g.id);
-        return { position: other?.presence?.dialPosition ?? 50, color: g.color };
+        if (result) return [{ position: result.position, color: g.color }];
+        const livePosition = others.find((o) => o.presence?.playerId === g.id)?.presence?.dialPosition;
+        return livePosition != null ? [{ position: livePosition, color: g.color }] : [];
       })
     : allGuessersLocked
       ? guessers.map((g) => {
@@ -157,7 +159,7 @@ export function MultiGuessView() {
         })
       : [];
 
-  const myDisplayPosition = myLocked ? myResult!.position : dialPosition;
+  const myDisplayPosition = amILocked ? myResult!.position : dialPosition;
   const currentRound = currentEntry.dialIndex + 1;
   const totalDialRounds = Math.max(...queue.map((e) => e.dialIndex)) + 1;
 
@@ -188,10 +190,10 @@ export function MultiGuessView() {
           <SpectrumDial
             card={dial}
             dialPosition={myDisplayPosition}
-            onDialChange={amIGuesser && !myLocked ? handleDialChange : () => {}}
+            onDialChange={amIGuesser && !amILocked ? handleDialChange : () => {}}
             showTarget={amIAuthor || allGuessersLocked}
             targetPosition={authorTarget}
-            disabled={!amIGuesser || myLocked}
+            disabled={!amIGuesser || amILocked}
             hideNeedle={amIAuthor}
             extraNeedles={extraNeedles}
           />
@@ -202,7 +204,7 @@ export function MultiGuessView() {
         </div>
 
         {/* Guesser status — shown to author live, shown to all after reveal */}
-        {(amIAuthor || myLocked || allGuessersLocked) && (
+        {(amIAuthor || amILocked || allGuessersLocked) && (
           <div className="flex flex-col gap-1">
             {guessers.map((g) => {
               const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
@@ -227,11 +229,11 @@ export function MultiGuessView() {
         )}
 
         {/* Actions */}
-        {amIGuesser && !myLocked && (
+        {amIGuesser && !amILocked && (
           <Button onClick={handleLockIn}>Lock In</Button>
         )}
 
-        {amIGuesser && myLocked && !allGuessersLocked && (
+        {amIGuesser && amILocked && !allGuessersLocked && (
           <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in<Ellipsis /></p>
         )}
 
