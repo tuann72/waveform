@@ -20,19 +20,15 @@ function pickDials(totalRounds: number): DialConfig[] {
   }));
 }
 
-// Every player is an author for every dial; every other player guesses each author's clue
+// One entry per (dial, author) pair — all non-authors guess simultaneously
 function buildGuessingQueue(
   playerIds: string[],
   totalDials: number,
-): Array<{ dialIndex: number; authorId: string; guesserId: string }> {
-  const queue: Array<{ dialIndex: number; authorId: string; guesserId: string }> = [];
+): Array<{ dialIndex: number; authorId: string }> {
+  const queue: Array<{ dialIndex: number; authorId: string }> = [];
   for (let d = 0; d < totalDials; d++) {
     for (const authorId of playerIds) {
-      for (const guesserId of playerIds) {
-        if (guesserId !== authorId) {
-          queue.push({ dialIndex: d, authorId, guesserId });
-        }
-      }
+      queue.push({ dialIndex: d, authorId });
     }
   }
   return queue;
@@ -82,6 +78,7 @@ export function MultiClueView() {
   );
 
   const advanceToGuessing = useMutation(({ storage }, queue: ReturnType<typeof buildGuessingQueue>) => {
+    if (storage.get("phase") !== "clue") return; // already transitioned — ignore duplicate calls
     const lb = storage.get("guessingQueue");
     queue.forEach((entry) => lb.push(entry));
     storage.set("currentGuessIndex", 0);
@@ -232,7 +229,10 @@ export function MultiClueView() {
             const done = (playerClues[id]?.length ?? 0) >= myDials.length;
             return (
               <div key={id} className="flex items-center justify-between text-sm">
-                <span>{info.name}{id === mp.playerId ? " (you)" : ""}</span>
+                <div className="flex items-center gap-2">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
+                  <span>{info.name}{id === mp.playerId ? " (you)" : ""}</span>
+                </div>
                 <Badge variant={done ? "default" : "outline"}>
                   {done ? "Ready" : "Writing…"}
                 </Badge>

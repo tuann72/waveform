@@ -2,7 +2,7 @@
 
 ## Overview
 
-A real-time multiplayer Wavelength board game. Players share a room code, each writes clues for spectrum dials, then take turns guessing. No single-player mode.
+A real-time multiplayer Wavelength board game. Players share a room code, each writes clues for spectrum dials, then all non-authors guess simultaneously. No single-player mode.
 
 **Stack:** Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui + Liveblocks v3 (`@liveblocks/client`, `@liveblocks/react`). All view switching is state-driven — no React Router.
 
@@ -19,11 +19,11 @@ START ──[Play]──► JOIN_OR_HOST
                                                                                       │
                                                                                  MULTI_CLUE ── all players write clues for every dial
                                                                                       │ when all submitted
-                                                                                 MULTI_GUESS ── players alternate guessing via queue
-                                                                                      │ when queue exhausted
-                                                                                 MULTI_RESULTS ── leaderboard + per-dial breakdown
+                                                                                 MULTI_GUESS ── all non-authors guess simultaneously per (author, dial) pair
+                                                                                      │ when all pairs exhausted
+                                                                                 MULTI_RESULTS ── leaderboard + per-dial breakdown with spectrum + needle positions
                                                                                       │
-                                                                                 [Play Again → START]
+                                                                                 [Play Again → WAITING_ROOM (same room)]
 ```
 
 ---
@@ -32,15 +32,15 @@ START ──[Play]──► JOIN_OR_HOST
 
 ```
 src/
-├── App.tsx                              ← providers + GameRouter
+├── App.tsx                              ← providers + GameRouter + RoomOrchestrator + RoomNavigator
 ├── index.css                            ← @keyframes gradient-flow (StartView background)
 ├── types/
 │   └── game.ts                          ← AppView, zone constants, GameState, SpectrumCard
 ├── data/
-│   └── spectrumCards.ts                 ← spectrum card pairs
+│   └── spectrumCards.ts                 ← 43 spectrum card pairs
 ├── context/
 │   ├── GameContext.tsx                  ← minimal view router + totalRounds state
-│   └── MultiplayerContext.tsx           ← pre-room local state (name, roomCode, playerId, isHost)
+│   └── MultiplayerContext.tsx           ← session-persisted local state (name, roomCode, playerId, isHost)
 ├── hooks/
 │   └── useDialDrag.ts                   ← pointer-capture drag (mouse + touch)
 ├── lib/
@@ -51,16 +51,16 @@ src/
 │   ├── theme-provider.tsx
 │   ├── ui/                              ← badge, button, card, input, label, select, separator
 │   └── game/
-│       ├── SpectrumDial.tsx             ← interactive spectrum dial with 5 non-overlapping zone segments
+│       ├── SpectrumDial.tsx             ← interactive spectrum dial; supports extraNeedles (colored, for multi-player reveal)
 │       └── ScoreDisplay.tsx             ← score + round counter (available, not currently used)
 └── views/
-    ├── StartView.tsx                    ← animated gradient, Play → joinOrHost
+    ├── StartView.tsx                    ← animated gradient, light/dark toggle (top-right), Play → joinOrHost
     └── multiplayer/
-        ├── JoinOrHostView.tsx           ← name input, Host (immediate) / Join (code)
-        ├── WaitingRoomView.tsx          ← lobby: room code + copy, mode/rounds, player list
-        ├── MultiClueView.tsx            ← clue entry phase
-        ├── MultiGuessView.tsx           ← alternating guess phase
-        └── MultiResultsView.tsx         ← leaderboard + breakdown
+        ├── JoinOrHostView.tsx           ← name input, Host / Join (code)
+        ├── WaitingRoomView.tsx          ← lobby: room code, mode/rounds, player list with color dots, host succession on leave
+        ├── MultiClueView.tsx            ← clue entry phase, colored player status dots
+        ├── MultiGuessView.tsx           ← simultaneous guess phase; author sees all live colored needles, guessers see only their own
+        └── MultiResultsView.tsx         ← leaderboard + per-dial breakdown with SpectrumDial showing all guess positions
 ```
 
 ---
@@ -75,7 +75,7 @@ export type AppView =
 export const ZONE_WIDTHS = { bullseye: 2, mid: 6, outer: 10 } as const;
 export const ZONE_POINTS = { bullseye: 4, mid: 3, outer: 2, miss: 0 } as const;
 export const DEFAULT_ROUNDS = 3;
-export const ROUND_OPTIONS = [3, 5, 10, 15, 20] as const;
+export const ROUND_OPTIONS = [1, 3, 5, 7, 10] as const;
 
 export interface SpectrumCard { id: string; left: string; right: string; }
 
@@ -99,18 +99,18 @@ Minimal state machine — just view routing and round count. All game logic live
 
 ## MultiplayerContext (`src/context/MultiplayerContext.tsx`)
 
-Pre-room local state — exists outside `RoomProvider`.
+Pre-room local state — exists outside `RoomProvider`. Persisted to `sessionStorage` so playerId survives page refreshes (enabling reconnect).
 
 ```ts
 interface MultiplayerState {
-  playerName: string;   // entered in JoinOrHostView
-  roomCode: string;     // 6-char alphanumeric; set by hostRoom() or joinRoom()
-  playerId: string;     // module-level constant (unique per tab, not sessionStorage)
+  playerName: string;
+  roomCode: string;
+  playerId: string;   // generated once per session (survives refresh, unique per tab)
   isHost: boolean;
 }
 ```
 
-**Helpers:** `setPlayerName`, `hostRoom()` (generates code, sets isHost=true), `joinRoom(code)`, `clearRoom()`
+**Helpers:** `setPlayerName`, `hostRoom()` (generates code, sets isHost=true), `joinRoom(code)`, `clearRoom()`, `setIsHost(v)` (used by RoomOrchestrator when host is promoted)
 
 **Room code generation:** `Math.random().toString(36).slice(2, 8).toUpperCase()`
 
@@ -122,20 +122,37 @@ interface MultiplayerState {
 export type RoomPhase = "lobby" | "clue" | "guessing" | "results";
 export type GameMode = "classic" | "3d";
 
+export type PlayerInfo = {
+  name: string;
+  isHost: boolean;
+  color: string;      // assigned from PLAYER_COLORS palette on join
+};
+
+export type GuessEntry = {
+  dialIndex: number;
+  authorId: string;
+  // No guesserId — all non-authors guess simultaneously
+};
+
 export type Storage = {
   phase: RoomPhase;
   gameMode: GameMode;
   totalRounds: number;
   hostId: string;
-  players: LiveMap<string, PlayerInfo>;          // id → { name, isHost }
-  playerDials: LiveMap<string, DialConfig[]>;    // playerId → DialConfig[] (each player picks own cards + targets)
+  players: LiveMap<string, PlayerInfo>;          // id → { name, isHost, color }
+  playerDials: LiveMap<string, DialConfig[]>;    // playerId → DialConfig[]
   playerClues: LiveMap<string, string[]>;        // playerId → clues[dialIndex]
-  guessingQueue: LiveList<GuessEntry>;           // { dialIndex, authorId, guesserId }
+  guessingQueue: LiveList<GuessEntry>;           // { dialIndex, authorId } per (author, dial) pair
   currentGuessIndex: number;
   guessResults: LiveMap<string, GuessResult>;    // key: `${guesserId}-${dialIndex}-${authorId}`
 };
 
-export type Presence = { playerName: string; cluesComplete: boolean };
+export type Presence = {
+  playerName: string;
+  cluesComplete: boolean;
+  playerId: string | null;     // used to match presence to storage player record
+  dialPosition: number | null; // live needle position broadcast during guessing
+};
 ```
 
 **Room ID:** `waveform-${roomCode}`
@@ -149,34 +166,57 @@ export type Presence = { playerName: string; cluesComplete: boolean };
 ```ts
 const ROOM_VIEWS = new Set(["waitingRoom", "multiClue", "multiGuess", "multiResults"]);
 
+// RoomOrchestrator — null-rendering component inside RoomProvider
+// • Watches useOthers() presence to detect host disconnection
+// • Promotes first connected player (by storage insertion order) via promoteToHost mutation
+// • Watches hostId storage: if it changes to mp.playerId, calls setIsHost(true)
+
+// RoomNavigator — null-rendering component inside RoomProvider
+// • On mount, checks current phase and redirects if joining mid-game
+//   (e.g. reconnect while phase === "guessing" → goTo("multiGuess"))
+
 function MultiplayerRoom() {
   // Wraps RoomProvider for all in-room views
   // initialStorage sets phase:"lobby", gameMode:"classic", totalRounds, empty collections
-}
-
-function GameRouter() {
-  if (ROOM_VIEWS.has(state.view)) return <MultiplayerRoom />;
-  switch (state.view) {
-    case "start":      return <StartView />;
-    case "joinOrHost": return <JoinOrHostView />;
-    default:           return null;
-  }
+  // Renders: <RoomOrchestrator /> <RoomNavigator /> + view components
 }
 ```
+
+---
+
+## Player Colors
+
+Assigned in `WaitingRoomView` when players join. Stored in `PlayerInfo.color` in Liveblocks storage so all clients see consistent colors throughout the session.
+
+```ts
+// src/views/multiplayer/WaitingRoomView.tsx
+const PLAYER_COLORS = [
+  "#f87171", "#fb923c", "#facc15", "#4ade80",
+  "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9",
+  "#f472b6", "#34d399", "#818cf8", "#94a3b8",
+];
+// Host always gets index 0; each joiner gets players.size % PLAYER_COLORS.length
+```
+
+Colors shown as dots next to player names in: WaitingRoom, MultiClue status list, MultiGuess guesser list, Results breakdown.
 
 ---
 
 ## SpectrumDial (`src/components/game/SpectrumDial.tsx`)
 
 ```ts
+export interface ExtraNeedle { position: number; color: string; }
+
 interface SpectrumDialProps {
   card: SpectrumCard;
-  dialPosition: number;           // 0–100
+  dialPosition: number;           // 0–100 (main/local needle)
   onDialChange: (pos: number) => void;
-  showTarget: boolean;            // shows zone segments when true
+  showTarget: boolean;            // reveals zone segments
   targetPosition?: number;        // required when showTarget=true
   disabled?: boolean;
-  hideNeedle?: boolean;           // hides the draggable needle (used in clue phase)
+  hideNeedle?: boolean;           // hides the white main needle (used for author view + clue phase)
+  smooth?: boolean;               // CSS transition on main needle (spectator views)
+  extraNeedles?: ExtraNeedle[];   // colored needles for other players (always smooth)
 }
 ```
 
@@ -190,7 +230,7 @@ interface SpectrumDialProps {
 
 **Track:** `bg-gradient-to-r from-purple-700 to-zinc-300`
 
-**Drag hook** (`useDialDrag.ts`): `setPointerCapture` on `pointerdown`, computes `(clientX - trackLeft) / trackWidth * 100` clamped 0–100 on `pointermove`. Works for mouse and touch.
+**Extra needles** rendered below the main white needle (so main is always on top). Each has a colored glow via `boxShadow`.
 
 ---
 
@@ -211,41 +251,49 @@ export function calcPoints(dial: number, target: number): number {
 ## Multiplayer Game Flow
 
 ### WaitingRoom
-- Host enters → `initRoom` mutation fires when storage loads: resets phase to "lobby", clears all leftover state (dials, clues, results, queue, players), registers host
-- Non-hosts: registered via `registerPlayer` mutation (enforces **MAX_PLAYERS = 12**)
+- Host enters → `initRoom` mutation fires when storage loads: skips if player already registered (returning after play again), otherwise does full reset (clears all game data, re-registers host with color index 0)
+- Non-hosts: registered via `registerPlayer` (no-op if already registered); enforces **MAX_PLAYERS = 12**
 - Host selects game mode (Classic active, 3D locked/coming soon) and round count
-- Host clicks "Start Game" (requires ≥2 players) → `startGame` mutation sets `phase = "clue"`, then `goTo("multiClue")` directly. No shared dials are generated here — each player generates their own in the clue phase.
+- Host clicks "Start Game" (requires ≥2 players) → `startGame` sets `phase = "clue"` → host navigates directly; non-hosts follow via `seenLobby` ref pattern
 
-**Navigation guard:** Hosts NEVER navigate via the phase `useEffect` — only via `handleStart`. Non-hosts use a `seenLobby` ref and only navigate when phase changes `"lobby" → "clue"` (prevents spurious navigation from stale rooms or Liveblocks optimistic state).
+**Leave Room behavior:**
+- Host + only player → calls `/api/delete-room` (Vite server middleware → Liveblocks REST `DELETE /v2/rooms/{id}`) → navigates; 400ms delay to flush mutation
+- Host + other players → `leaveRoom` mutation removes host from players, promotes next player (first by storage insertion order), sets new `hostId`; remaining clients' `RoomOrchestrator` syncs via `hostId` storage watch
+- Non-host → `leaveRoom` mutation removes from players list
+
+**Navigation guard:** Hosts NEVER navigate via phase `useEffect` — only via `handleStart`. Non-hosts use `seenLobby` ref.
 
 ### MultiClue
-- On mount, each player calls `savePlayerDials(playerId, pickDials(totalRounds))` to generate their own random cards + targets (stored in `playerDials`). No-op if already set.
+- On mount, each player calls `savePlayerDials(playerId, pickDials(totalRounds))` to generate random cards + targets. No-op if already set.
 - Each player sees their own dials with target visible (`hideNeedle=true`) and writes one clue per dial
-- Tab through dials with Prev/Next; final dial shows "Submit All Clues"
-- After submitting, `playerClues.set(playerId, clues)` is called and `presence.cluesComplete = true`
-- Host watches `playerClues` + `playerDials` via `useEffect`; when every player has both, builds `guessingQueue` and sets `phase = "guessing"`
+- Host watches `playerClues` + `playerDials`; when every player has both, builds `guessingQueue` and sets `phase = "guessing"`
 
-**Guessing queue logic** — every player authors every dial, every other player guesses:
+**Guessing queue format** — one entry per (dial, author) pair; all non-authors guess simultaneously:
 ```
 for each dial d:
   for each authorId:
-    for each guesserId (≠ authorId):
-      push { dialIndex: d, authorId, guesserId }
+    push { dialIndex: d, authorId }
 ```
 
-**Result key format:** `` `${guesserId}-${dialIndex}-${authorId}` `` (includes authorId to disambiguate multiple authors per dial index)
+`advanceToGuessing` mutation guards against duplicate calls with `if (phase !== "clue") return`.
+
+**Result key format:** `` `${guesserId}-${dialIndex}-${authorId}` ``
 
 ### MultiGuess
-- Works through `guessingQueue[currentGuessIndex]` one at a time
-- Card and target come from `playerDials[authorId][dialIndex]`
-- Active guesser drags dial and locks in → `guessResults.set(`${guesserId}-${dialIndex}-${authorId}`, { position, points })`, increment `currentGuessIndex`
-- When `currentGuessIndex >= queueLength` → `phase = "results"`
-- Score badge shown immediately after lock-in
+- Works through `guessingQueue[currentGuessIndex]` — each entry is `{ dialIndex, authorId }`
+- All non-authors guess simultaneously by dragging their own needle
+- **Author view:** `hideNeedle=true` + `extraNeedles` showing all guessers' live colored positions from `useOthers` presence (or locked result position once submitted)
+- **Guesser view:** own white needle only (no extra needles); `smooth={false}` for instant drag feedback
+- Live needle positions broadcast via `presence.dialPosition` → `useUpdateMyPresence` on every drag
+- `showTarget` only reveals after **all guessers** have locked in (`allGuessersLocked`)
+- Each guesser locks in independently via `recordGuess` mutation
+- When `allGuessersLocked` → zones reveal for everyone; author clicks **Next** → `advanceGuess` mutation
+- Score points not shown after lock-in — only the visual dial with zones + colored needles
 
 ### MultiResults
-- Leaderboard: sum of guessing points per player, ranked descending
-- Per-dial breakdown: grouped by (author, dialIndex) pair from queue; card label from `playerDials[authorId][dialIndex]`, clue from `playerClues[authorId][dialIndex]`
-- "Play Again" → `clearRoom()` + `goTo("start")`
+- Leaderboard: scores summed from `guessResults` keys (parsed as `${guesserId}-${dialIndex}-${authorId}`)
+- Per-dial breakdown: each card shows author/clue, full `SpectrumDial` with `showTarget=true` + `extraNeedles` for all guessers' locked positions, per-player score row
+- **Play Again** (host only): `resetForNewGame` mutation clears game data but **keeps `players` LiveMap** (colors + host preserved) → sets `phase="lobby"` → host navigates to waitingRoom; non-hosts follow via `phase` watch
 
 ---
 
@@ -253,12 +301,44 @@ for each dial d:
 
 | View | Key Elements |
 |---|---|
-| `StartView` | Animated gradient background, Play button → joinOrHost |
-| `JoinOrHostView` | Name input (required, shows inline error if missing), Host (immediate) / Join (code entry panel) |
-| `WaitingRoomView` | Room code + "Copy Code" button, Classic/3D mode selector (host only), rounds dropdown, player list with Host/You badges, Start Game (disabled until ≥2 players) |
-| `MultiClueView` | Dial tabs, SpectrumDial `showTarget=true hideNeedle=true`, clue Input per dial, Prev/Next navigation, Submit All Clues, per-player ready status |
-| `MultiGuessView` | Clue display, SpectrumDial (draggable for active guesser), Lock In button, score reveal badge, "Waiting for X…" for others |
-| `MultiResultsView` | Ranked leaderboard, per-dial breakdown with clue + per-player scores, Play Again |
+| `StartView` | Animated gradient (light/dark variants), light/dark toggle button (top-right, defaults to system), Play → joinOrHost |
+| `JoinOrHostView` | Name input (required), Host / Join (code entry) |
+| `WaitingRoomView` | Room code + copy, Classic/3D mode selector, rounds dropdown (`[1,3,5,7,10]`), player list with colored dots + Host/You badges, Start Game, Leave Room (with host succession logic) |
+| `MultiClueView` | Dial tabs with color dots on status, `SpectrumDial` `showTarget=true hideNeedle=true`, clue input, Submit All Clues |
+| `MultiGuessView` | Clue display, SpectrumDial (author: extraNeedles for all guessers; guesser: own needle only), Lock In, Next (author after all locked), guesser status list |
+| `MultiResultsView` | Ranked leaderboard with color dots, per-dial SpectrumDial breakdown with all guess needle positions, Play Again (host) / waiting message (non-host) |
+
+---
+
+## Theme
+
+`StartView` supports light and dark gradient variants. Toggle in top-right corner (sun/moon icon). Defaults to system preference via `matchMedia`. Preference persisted in `localStorage` via shadcn `ThemeProvider`.
+
+```ts
+const GRADIENTS = {
+  light: "linear-gradient(-45deg, #2563eb, #7c3aed, #a855f7, #f97316)",
+  dark:  "linear-gradient(-45deg, #1e3a8a, #4c1d95, #581c87, #7c2d12)",
+};
+```
+
+Both use `backgroundImage` (not `background` shorthand) + `backgroundSize: "300% 300%"` + `gradient-flow` keyframe animation.
+
+---
+
+## Vite Server Middleware (`vite.config.ts`)
+
+A custom Vite plugin adds a server-side API route to delete Liveblocks rooms without exposing the secret key to the browser.
+
+```
+DELETE /api/delete-room?roomId={id}
+→ calls Liveblocks REST API: DELETE https://api.liveblocks.io/v2/rooms/{id}
+   Authorization: Bearer LIVEBLOCKS_SECRET_KEY
+```
+
+**Key implementation details:**
+- Uses `loadEnv(mode, process.cwd(), '')` (empty prefix = loads ALL env vars including non-`VITE_` ones)
+- Middleware registered as catch-all (not path-prefixed) to prevent Connect stripping `req.url` and losing the query string
+- Used in `configureServer` (dev); can be extended to `configurePreviewServer`
 
 ---
 
@@ -266,8 +346,8 @@ for each dial d:
 
 ```
 # .env.local
-VITE_LIVEBLOCKS_PUBLIC_KEY=pk_...
-LIVEBLOCKS_SECRET_KEY=sk_...
+VITE_LIVEBLOCKS_PUBLIC_KEY=pk_...   ← exposed to browser (Liveblocks client)
+LIVEBLOCKS_SECRET_KEY=sk_...        ← server-side only (room deletion API)
 ```
 
 ---
@@ -282,6 +362,12 @@ All `<Button>` components have `cursor-pointer` in the base CVA class.
 
 ---
 
+## Spectrum Cards (`src/data/spectrumCards.ts`)
+
+43 total cards. Examples: Hot/Cold, Good/Evil, Overrated/Underrated, Niche/Mainstream, Instinct/Logic, Fantasy/Sci-Fi, Chaotic/Orderly, Timeless/Trendy.
+
+---
+
 ## Future: 3D Mode (React Three Fiber)
 
 The 3D mode button is present in WaitingRoom as a locked placeholder. When implemented:
@@ -293,12 +379,5 @@ bun add -d @types/three
 ```
 
 **Concept:** Replace the flat spectrum bar with a 3D scene — a glowing tunnel/corridor where the target zone is a band of light along the Z-axis. The needle becomes a 3D marker the player drags.
-
-**Key R3F pieces:**
-- `<Canvas>` in a new `Multi3DView.tsx`
-- `<mesh>` + `<tubeGeometry>` for the spectrum tunnel
-- `<MeshStandardMaterial emissive>` for zone highlights
-- `useFrame` for idle animation
-- Drag maps 3D world space → 0–100 position → same `calcPoints` scoring
 
 The `GameMode` type and `gameMode` Liveblocks storage field are already in place. Scoring, card data, and the guessing queue are shared with Classic.

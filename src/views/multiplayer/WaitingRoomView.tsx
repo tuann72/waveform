@@ -12,6 +12,12 @@ import { ROUND_OPTIONS } from "@/types/game";
 
 const MAX_PLAYERS = 12;
 
+const PLAYER_COLORS = [
+  "#f87171", "#fb923c", "#facc15", "#4ade80",
+  "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9",
+  "#f472b6", "#34d399", "#818cf8", "#94a3b8",
+];
+
 export function WaitingRoomView() {
   const { state, goTo } = useGame();
   const { mp, clearRoom } = useMultiplayer();
@@ -22,6 +28,7 @@ export function WaitingRoomView() {
   const gameMode = useStorage((s) => s?.gameMode ?? "classic");
 
   const [copied, setCopied] = useState(false);
+  const [leaving, setLeaving] = useState(false);
   const storageLoaded = useStorage((s) => s !== null);
   // Non-hosts navigate when phase changes lobby → clue.
   // Hosts NEVER navigate via this effect — they use the Start Game button.
@@ -29,9 +36,12 @@ export function WaitingRoomView() {
 
   // Host resets room to a clean state (handles stale rooms from previous games)
   const initRoom = useMutation(({ storage }, id: string, name: string) => {
+    const players = storage.get("players");
+    // Already registered — reconnecting mid-game or returning after play again; leave state intact
+    if (players.has(id)) return;
+    // New host or stale room from a previous session — full reset
     storage.set("phase", "lobby");
     storage.set("currentGuessIndex", 0);
-    // Clear leftover per-player dials / clues / results / queue
     const playerDials = storage.get("playerDials");
     for (const k of playerDials.keys()) playerDials.delete(k);
     const clues = storage.get("playerClues");
@@ -40,18 +50,18 @@ export function WaitingRoomView() {
     for (const k of results.keys()) results.delete(k);
     const queue = storage.get("guessingQueue");
     while (queue.length > 0) queue.delete(0);
-    // Reset player list with just the host
-    const players = storage.get("players");
     for (const k of players.keys()) players.delete(k);
-    players.set(id, { name, isHost: true });
+    players.set(id, { name, isHost: true, color: PLAYER_COLORS[0] });
   }, []);
 
   // Non-host registration — enforces 12-player cap
   const registerPlayer = useMutation(
     ({ storage }, id: string, name: string) => {
       const players = storage.get("players");
+      if (players.has(id)) return; // already registered (returning after play again)
       if (players.size >= MAX_PLAYERS) return;
-      players.set(id, { name, isHost: false });
+      const colorIndex = players.size % PLAYER_COLORS.length;
+      players.set(id, { name, isHost: false, color: PLAYER_COLORS[colorIndex] });
     },
     [],
   );
@@ -95,7 +105,52 @@ export function WaitingRoomView() {
     goTo("multiClue");
   }
 
-  function handleLeave() {
+  // Removes the leaving player from storage and handles host succession/cleanup
+  const leaveRoom = useMutation(({ storage }, leavingId: string, wasHost: boolean) => {
+    const players = storage.get("players");
+    players.delete(leavingId);
+
+    if (!wasHost) return;
+
+    if (players.size === 0) {
+      // No one left — reset to a clean slate so the room code can be reused
+      storage.set("phase", "lobby");
+      storage.set("currentGuessIndex", 0);
+      const pd = storage.get("playerDials");
+      for (const k of pd.keys()) pd.delete(k);
+      const cl = storage.get("playerClues");
+      for (const k of cl.keys()) cl.delete(k);
+      const res = storage.get("guessResults");
+      for (const k of res.keys()) res.delete(k);
+      const q = storage.get("guessingQueue");
+      while (q.length > 0) q.delete(0);
+    } else {
+      // Promote the first remaining player to host
+      for (const [newHostId, newHostInfo] of players.entries()) {
+        players.set(newHostId, { ...newHostInfo, isHost: true });
+        storage.set("hostId", newHostId);
+        break;
+      }
+    }
+  }, []);
+
+  async function handleLeave() {
+    setLeaving(true);
+
+    if (mp.isHost && playerCount <= 1) {
+      // Last player — delete the room from Liveblocks entirely via server-side API
+      try {
+        await fetch(`/api/delete-room?roomId=waveform-${mp.roomCode}`, { method: 'DELETE' });
+      } catch {
+        // best effort — navigate regardless
+      }
+    } else {
+      // Remove self from storage and promote next host if needed,
+      // then wait for the mutation to sync before disconnecting
+      leaveRoom(mp.playerId, mp.isHost);
+      await new Promise<void>((r) => setTimeout(r, 400));
+    }
+
     clearRoom();
     goTo("start");
   }
@@ -184,7 +239,13 @@ export function WaitingRoomView() {
           </p>
           {players?.map(([id, info]) => (
             <div key={id} className="flex items-center justify-between py-1">
-              <span className="text-sm text-foreground">{info.name}</span>
+              <div className="flex items-center gap-2">
+                <span
+                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                  style={{ background: info.color }}
+                />
+                <span className="text-sm text-foreground">{info.name}</span>
+              </div>
               <div className="flex gap-1">
                 {info.isHost && <Badge variant="secondary">Host</Badge>}
                 {id === mp.playerId && <Badge variant="outline">You</Badge>}
@@ -211,8 +272,8 @@ export function WaitingRoomView() {
           </p>
         )}
 
-        <Button variant="ghost" className="text-muted-foreground" onClick={handleLeave}>
-          Leave Room
+        <Button variant="ghost" className="text-muted-foreground" onClick={handleLeave} disabled={leaving}>
+          {leaving ? "Leaving…" : "Leave Room"}
         </Button>
       </div>
     </div>

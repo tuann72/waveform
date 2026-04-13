@@ -13,12 +13,13 @@ export type DialConfig = {
 export type PlayerInfo = {
   name: string;
   isHost: boolean;
+  color: string;
 };
 
 export type GuessEntry = {
   dialIndex: number;
   authorId: string;
-  guesserId: string;
+  // No guesserId — all non-authors guess simultaneously
 };
 
 export type GuessResult = {
@@ -29,6 +30,8 @@ export type GuessResult = {
 export type Presence = {
   playerName: string;
   cluesComplete: boolean;
+  playerId: string | null;
+  dialPosition: number | null;
 };
 
 export type GameMode = "classic" | "3d";

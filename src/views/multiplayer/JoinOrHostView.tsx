@@ -112,7 +112,6 @@ export function JoinOrHostView() {
             <Button onClick={handleJoin} disabled={code.length < 6}>
               Join Room
             </Button>
-            <Button variant="ghost" onClick={() => setShowJoin(false)}>← Back</Button>
           </div>
         )}
 

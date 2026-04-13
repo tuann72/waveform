@@ -1,16 +1,17 @@
 import { useEffect, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
-import { useStorage, useMutation } from "@/lib/liveblocks";
+import { useStorage, useMutation, useOthers, useUpdateMyPresence } from "@/lib/liveblocks";
 import type { DialConfig } from "@/lib/liveblocks";
 import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { calcPoints } from "@/lib/scoring";
 
 export function MultiGuessView() {
   const { goTo } = useGame();
   const { mp } = useMultiplayer();
+  const updateMyPresence = useUpdateMyPresence();
+  const others = useOthers();
 
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const playerDials = useStorage((s) => s ? s.playerDials as Record<string, DialConfig[]> : {} as Record<string, DialConfig[]>) ?? {};
@@ -24,28 +25,52 @@ export function MultiGuessView() {
   const [dialResetFor, setDialResetFor] = useState<number | null>(null);
 
   const currentEntry = queue[currentGuessIndex ?? 0];
-  const isMyTurn = currentEntry?.guesserId === mp.playerId;
-  // Compute author's dial + target early so handleLockIn and JSX can both use it
+  const amIAuthor = currentEntry?.authorId === mp.playerId;
+
+  const guessers = players
+    .filter(([id]) => id !== currentEntry?.authorId)
+    .map(([id, info]) => ({ id, color: info.color, name: info.name }));
+  const amIGuesser = guessers.some((g) => g.id === mp.playerId);
+
   const authorDial = currentEntry
     ? (playerDials[currentEntry.authorId]?.[currentEntry.dialIndex] ?? null)
     : null;
   const authorTarget = authorDial?.targetPosition ?? 50;
 
-  // Reset dial position when turn changes (update-during-render avoids effect cascade)
+  // Reset dial + presence when turn changes
   if (currentGuessIndex !== dialResetFor) {
     setDialResetFor(currentGuessIndex ?? 0);
     setDialPosition(50);
   }
 
-  // Auto-navigate to results
+  useEffect(() => {
+    updateMyPresence({ dialPosition: null });
+  }, [currentGuessIndex]);
+
   useEffect(() => {
     if (phase === "results") goTo("multiResults");
   }, [phase]);
 
-  const lockInGuess = useMutation(
+  useEffect(() => {
+    document.body.style.overflow = "hidden";
+    return () => { document.body.style.overflow = ""; };
+  }, []);
+
+  function handleDialChange(pos: number) {
+    setDialPosition(pos);
+    updateMyPresence({ dialPosition: pos });
+  }
+
+  const recordGuess = useMutation(
     ({ storage }, guesserId: string, dialIndex: number, authorId: string, position: number, points: number) => {
       const key = `${guesserId}-${dialIndex}-${authorId}`;
       storage.get("guessResults").set(key, { position, points });
+    },
+    [],
+  );
+
+  const advanceGuess = useMutation(
+    ({ storage }) => {
       const current = storage.get("currentGuessIndex") as unknown as number;
       const nextIndex = current + 1;
       const queueLen = storage.get("guessingQueue").length;
@@ -58,14 +83,14 @@ export function MultiGuessView() {
   );
 
   function handleLockIn() {
-    if (!currentEntry) return;
+    if (!currentEntry || !amIGuesser) return;
     const pts = calcPoints(dialPosition, authorTarget);
-    lockInGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, dialPosition, pts);
+    recordGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, dialPosition, pts);
   }
 
   if (!queue.length || !currentEntry) {
     return (
-      <div className="min-h-screen flex items-center justify-center">
+      <div className="h-screen overflow-hidden flex items-center justify-center">
         <p className="text-muted-foreground">Loading…</p>
       </div>
     );
@@ -73,24 +98,43 @@ export function MultiGuessView() {
 
   const dial = authorDial ?? { id: "", left: "?", right: "?", targetPosition: 50 };
   const authorName = players.find(([id]) => id === currentEntry.authorId)?.[1].name ?? "?";
-  const guesserName = players.find(([id]) => id === currentEntry.guesserId)?.[1].name ?? "?";
   const clue = playerClues[currentEntry.authorId]?.[currentEntry.dialIndex] ?? "";
-  const resultKey = `${currentEntry.guesserId}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
-  const result = guessResults[resultKey];
-  const locked = !!result;
 
+  const myResultKey = amIGuesser
+    ? `${mp.playerId}-${currentEntry.dialIndex}-${currentEntry.authorId}`
+    : null;
+  const myResult = myResultKey ? guessResults[myResultKey] : undefined;
+  const myLocked = !!myResult;
+
+  const allGuessersLocked = guessers.length > 0 && guessers.every((g) => {
+    const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+    return !!guessResults[key];
+  });
+
+  // Extra needles for author view
+  const extraNeedles = amIAuthor
+    ? guessers.map((g) => {
+        const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+        const result = guessResults[key];
+        if (result) return { position: result.position, color: g.color };
+        const other = others.find((o) => o.presence?.playerId === g.id);
+        return { position: other?.presence?.dialPosition ?? 50, color: g.color };
+      })
+    : [];
+
+  const myDisplayPosition = myLocked ? myResult!.position : dialPosition;
   const progress = `${(currentGuessIndex ?? 0) + 1} / ${queue.length}`;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4 py-8">
+    <div className="h-screen overflow-hidden flex flex-col items-center justify-center gap-6 bg-background px-4 py-8">
       <div className="w-full max-w-sm flex flex-col gap-5">
         {/* Header */}
         <div className="text-center">
           <p className="text-xs text-muted-foreground uppercase tracking-widest mb-1">
-            Guess {progress}
+            Round {progress}
           </p>
           <h2 className="text-xl font-semibold">
-            {isMyTurn ? "Your turn to guess!" : `${guesserName} is guessing`}
+            {amIAuthor ? "Watch the guesses" : "Your turn to guess"}
           </h2>
           <p className="text-sm text-muted-foreground mt-1">
             Clue by <span className="font-medium">{authorName}</span>
@@ -107,11 +151,13 @@ export function MultiGuessView() {
         <div className="flex flex-col gap-2">
           <SpectrumDial
             card={dial}
-            dialPosition={dialPosition}
-            onDialChange={isMyTurn && !locked ? setDialPosition : () => {}}
-            showTarget={locked}
+            dialPosition={myDisplayPosition}
+            onDialChange={amIGuesser && !myLocked ? handleDialChange : () => {}}
+            showTarget={allGuessersLocked}
             targetPosition={authorTarget}
-            disabled={!isMyTurn || locked}
+            disabled={!amIGuesser || myLocked}
+            hideNeedle={amIAuthor}
+            extraNeedles={extraNeedles}
           />
           <div className="flex justify-between text-xs text-muted-foreground px-1">
             <span>{dial.left}</span>
@@ -119,23 +165,42 @@ export function MultiGuessView() {
           </div>
         </div>
 
-        {/* Score reveal */}
-        {locked && result && (
-          <div className="text-center flex flex-col items-center gap-1">
-            <Badge variant={result.points === 4 ? "default" : result.points >= 2 ? "secondary" : "outline"}>
-              {result.points === 4 ? "Bull's Eye!" : result.points === 3 ? "Close!" : result.points === 2 ? "Not Bad" : "Miss"}
-            </Badge>
-            <p className="text-lg font-bold">+{result.points} pts</p>
+        {/* Guesser status — shown to author live, shown to all after reveal */}
+        {(amIAuthor || allGuessersLocked) && (
+          <div className="flex flex-col gap-1">
+            {guessers.map((g) => {
+              const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+              const locked = !!guessResults[key];
+              return (
+                <div key={g.id} className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: g.color }} />
+                  <span>{g.name}{g.id === mp.playerId ? " (you)" : ""}</span>
+                  <span className="ml-auto">{locked ? "Locked in" : "Guessing…"}</span>
+                </div>
+              );
+            })}
           </div>
         )}
 
-        {/* Action */}
-        {isMyTurn && !locked && (
+        {/* Actions */}
+        {amIGuesser && !myLocked && (
           <Button onClick={handleLockIn}>Lock In</Button>
         )}
 
-        {!isMyTurn && (
-          <p className="text-sm text-center text-muted-foreground">Waiting for {guesserName}…</p>
+        {amIGuesser && myLocked && !allGuessersLocked && (
+          <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in…</p>
+        )}
+
+        {allGuessersLocked && amIAuthor && (
+          <Button onClick={() => advanceGuess()}>Next</Button>
+        )}
+
+        {allGuessersLocked && !amIAuthor && (
+          <p className="text-sm text-center text-muted-foreground">Waiting for {authorName} to continue…</p>
+        )}
+
+        {amIAuthor && !allGuessersLocked && (
+          <p className="text-sm text-center text-muted-foreground">Watching guesses come in…</p>
         )}
       </div>
     </div>

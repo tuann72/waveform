@@ -1,14 +1,21 @@
 import { createContext, useContext, useReducer, type ReactNode } from 'react'
 import { DEFAULT_ROUNDS, type AppView, type GameState } from '@/types/game'
+import { SESSION_KEY } from '@/context/MultiplayerContext'
 
 type GameAction =
   | { type: 'SET_VIEW'; view: AppView }
   | { type: 'SET_TOTAL_ROUNDS'; totalRounds: number }
   | { type: 'RESET_GAME' }
 
-const initialState: GameState = {
-  view: 'start',
-  totalRounds: DEFAULT_ROUNDS,
+function getInitialView(): AppView {
+  try {
+    const raw = sessionStorage.getItem(SESSION_KEY)
+    if (raw) {
+      const { roomCode } = JSON.parse(raw)
+      if (roomCode) return 'waitingRoom'
+    }
+  } catch {}
+  return 'start'
 }
 
 function gameReducer(state: GameState, action: GameAction): GameState {
@@ -18,7 +25,7 @@ function gameReducer(state: GameState, action: GameAction): GameState {
     case 'SET_TOTAL_ROUNDS':
       return { ...state, totalRounds: action.totalRounds }
     case 'RESET_GAME':
-      return { ...initialState }
+      return { view: 'start', totalRounds: DEFAULT_ROUNDS }
     default:
       return state
   }
@@ -35,7 +42,10 @@ interface GameContextValue {
 const GameContext = createContext<GameContextValue | null>(null)
 
 export function GameProvider({ children }: { children: ReactNode }) {
-  const [state, dispatch] = useReducer(gameReducer, initialState)
+  const [state, dispatch] = useReducer(gameReducer, undefined, () => ({
+    view: getInitialView(),
+    totalRounds: DEFAULT_ROUNDS,
+  }))
 
   const value: GameContextValue = {
     state,
