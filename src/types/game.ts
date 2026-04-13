@@ -14,7 +14,7 @@ export interface SpectrumCard {
   id: string;
   left: string;
   right: string;
-  category: string;
+  category?: string;
 }
 
 export interface GameState {
