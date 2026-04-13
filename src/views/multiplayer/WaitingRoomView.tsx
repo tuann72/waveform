@@ -125,6 +125,10 @@ export function WaitingRoomView() {
     storage.set("selectedCategories", cats);
   }, []);
 
+  const kickPlayer = useMutation(({ storage }, kickId: string) => {
+    storage.get("players").delete(kickId);
+  }, []);
+
   function toggleCategory(cat: string) {
     if (!mp.isHost) return;
     const next = selectedCategories.includes(cat)
@@ -351,9 +355,18 @@ export function WaitingRoomView() {
                 />
                 <span className="text-sm text-foreground">{info.name}</span>
               </div>
-              <div className="flex gap-1">
+              <div className="flex gap-1 items-center">
                 {info.isHost && <Badge variant="secondary">Host</Badge>}
                 {id === mp.playerId && <Badge variant="outline">You</Badge>}
+                {mp.isHost && id !== mp.playerId && (
+                  <button
+                    onClick={() => kickPlayer(id)}
+                    className="ml-1 text-muted-foreground hover:text-destructive transition-colors text-base leading-none cursor-pointer"
+                    aria-label={`Kick ${info.name}`}
+                  >
+                    ×
+                  </button>
+                )}
               </div>
             </div>
           ))}

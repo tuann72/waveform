@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation, useOthers, useUpdateMyPresence } from "@/lib/liveblocks";
@@ -25,6 +25,7 @@ export function MultiGuessView() {
   const [dialPosition, setDialPosition] = useState(50);
   const [dialResetFor, setDialResetFor] = useState<number | null>(null);
   const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
+  const isAdvancing = useRef(false);
 
   const currentEntry = queue[currentGuessIndex ?? 0];
   const amIAuthor = currentEntry?.authorId === mp.playerId;
@@ -44,6 +45,27 @@ export function MultiGuessView() {
     : null;
   const authorTarget = authorDial?.targetPosition ?? 50;
 
+  const recordGuess = useMutation(
+    ({ storage }, guesserId: string, dialIndex: number, authorId: string, position: number, points: number) => {
+      const key = `${guesserId}-${dialIndex}-${authorId}`;
+      storage.get("guessResults").set(key, { position, points });
+    },
+    [],
+  );
+
+  const advanceGuess = useMutation(
+    ({ storage }) => {
+      const current = storage.get("currentGuessIndex") as unknown as number;
+      const nextIndex = current + 1;
+      const queueLen = storage.get("guessingQueue").length;
+      storage.set("currentGuessIndex", nextIndex);
+      if (nextIndex >= queueLen) {
+        storage.set("phase", "results");
+      }
+    },
+    [],
+  );
+
   // Reset dial + presence when turn changes
   if (currentGuessIndex !== dialResetFor) {
     setDialResetFor(currentGuessIndex ?? 0);
@@ -52,6 +74,7 @@ export function MultiGuessView() {
 
   useEffect(() => {
     updateMyPresence({ dialPosition: null });
+    isAdvancing.current = false;
   }, [currentGuessIndex]);
 
   useEffect(() => {
@@ -77,7 +100,10 @@ export function MultiGuessView() {
   }, [allGuessersLocked, currentGuessIndex]);
 
   useEffect(() => {
-    if (autoAdvanceTimer === 0 && amIAuthor) advanceGuess();
+    if (autoAdvanceTimer === 0 && amIAuthor && allGuessersLocked && !isAdvancing.current) {
+      isAdvancing.current = true;
+      advanceGuess();
+    }
   }, [autoAdvanceTimer]);
 
   function handleDialChange(pos: number) {
@@ -85,26 +111,11 @@ export function MultiGuessView() {
     updateMyPresence({ dialPosition: pos });
   }
 
-  const recordGuess = useMutation(
-    ({ storage }, guesserId: string, dialIndex: number, authorId: string, position: number, points: number) => {
-      const key = `${guesserId}-${dialIndex}-${authorId}`;
-      storage.get("guessResults").set(key, { position, points });
-    },
-    [],
-  );
-
-  const advanceGuess = useMutation(
-    ({ storage }) => {
-      const current = storage.get("currentGuessIndex") as unknown as number;
-      const nextIndex = current + 1;
-      const queueLen = storage.get("guessingQueue").length;
-      storage.set("currentGuessIndex", nextIndex);
-      if (nextIndex >= queueLen) {
-        storage.set("phase", "results");
-      }
-    },
-    [],
-  );
+  function handleAdvance() {
+    if (isAdvancing.current) return;
+    isAdvancing.current = true;
+    advanceGuess();
+  }
 
   function handleLockIn() {
     if (!currentEntry || !amIGuesser) return;
@@ -147,7 +158,8 @@ export function MultiGuessView() {
       : [];
 
   const myDisplayPosition = myLocked ? myResult!.position : dialPosition;
-  const progress = `${(currentGuessIndex ?? 0) + 1} / ${queue.length}`;
+  const currentRound = currentEntry.dialIndex + 1;
+  const totalDialRounds = Math.max(...queue.map((e) => e.dialIndex)) + 1;
 
   return (
     <div className="h-screen overflow-hidden flex flex-col items-center justify-center gap-6 bg-background px-4 py-8">
@@ -155,7 +167,7 @@ export function MultiGuessView() {
         {/* Header */}
         <div className="text-center">
           <p className="text-xs text-muted-foreground uppercase tracking-widest mb-1">
-            Round {progress}
+            Round {currentRound} of {totalDialRounds}
           </p>
           <h2 className="text-xl font-semibold">
             {amIAuthor ? "Watch the guesses" : "Your turn to guess"}
@@ -190,7 +202,7 @@ export function MultiGuessView() {
         </div>
 
         {/* Guesser status — shown to author live, shown to all after reveal */}
-        {(amIAuthor || allGuessersLocked) && (
+        {(amIAuthor || myLocked || allGuessersLocked) && (
           <div className="flex flex-col gap-1">
             {guessers.map((g) => {
               const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
@@ -225,7 +237,7 @@ export function MultiGuessView() {
 
         {allGuessersLocked && amIAuthor && (
           <div className="flex items-center gap-3">
-            <Button className="flex-1" onClick={() => advanceGuess()}>Next</Button>
+            <Button className="flex-1" onClick={handleAdvance}>Next</Button>
             {autoAdvanceTimer !== null && autoAdvanceTimer > 0 && (
               <span className="text-sm text-muted-foreground tabular-nums w-6 text-center">{autoAdvanceTimer}</span>
             )}

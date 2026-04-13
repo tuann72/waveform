@@ -37,7 +37,7 @@ src/
 ├── types/
 │   └── game.ts                          ← AppView, zone constants, GameState, SpectrumCard
 ├── data/
-│   └── spectrumCards.ts                 ← 43 spectrum card pairs
+│   └── spectrumCards.ts                 ← 93 spectrum card pairs with categories
 ├── context/
 │   ├── GameContext.tsx                  ← minimal view router + totalRounds state
 │   └── MultiplayerContext.tsx           ← session-persisted local state (name, roomCode, playerId, isHost)
@@ -49,18 +49,20 @@ src/
 │   └── utils.ts                         ← shadcn cn() helper
 ├── components/
 │   ├── theme-provider.tsx
-│   ├── ui/                              ← badge, button, card, input, label, select, separator
+│   ├── ui/
+│   │   ├── ellipsis.tsx                 ← animated cycling ellipsis (. → .. → ...) at 500ms
+│   │   └── badge, button, card, input, label, select, separator
 │   └── game/
 │       ├── SpectrumDial.tsx             ← interactive spectrum dial; supports extraNeedles (colored, for multi-player reveal)
 │       └── ScoreDisplay.tsx             ← score + round counter (available, not currently used)
 └── views/
     ├── StartView.tsx                    ← animated gradient, light/dark toggle (top-right), Play → joinOrHost
     └── multiplayer/
-        ├── JoinOrHostView.tsx           ← name input, Host / Join (code)
-        ├── WaitingRoomView.tsx          ← lobby: room code, mode/rounds, player list with color dots, host succession on leave
-        ├── MultiClueView.tsx            ← clue entry phase, colored player status dots
-        ├── MultiGuessView.tsx           ← simultaneous guess phase; author sees all live colored needles, guessers see only their own
-        └── MultiResultsView.tsx         ← leaderboard + per-dial breakdown with SpectrumDial showing all guess positions
+        ├── JoinOrHostView.tsx           ← name input, Host / Join (code); prefills code from ?room= URL param
+        ├── WaitingRoomView.tsx          ← lobby: room code, mode/rounds/timer/categories, player list, host kick, motion animations
+        ├── MultiClueView.tsx            ← clue entry phase with countdown timer bar, player status dots
+        ├── MultiGuessView.tsx           ← simultaneous guess phase; round counter by dialIndex; status list for locked-in guessers
+        └── MultiResultsView.tsx         ← leaderboard + per-dial breakdown (By Round / By Player toggle) + Leave Game
 ```
 
 ---
@@ -75,9 +77,9 @@ export type AppView =
 export const ZONE_WIDTHS = { bullseye: 2, mid: 6, outer: 10 } as const;
 export const ZONE_POINTS = { bullseye: 4, mid: 3, outer: 2, miss: 0 } as const;
 export const DEFAULT_ROUNDS = 3;
-export const ROUND_OPTIONS = [1, 3, 5, 7, 10] as const;
+export const ROUND_OPTIONS = [1, 2, 3, 4, 5] as const;
 
-export interface SpectrumCard { id: string; left: string; right: string; }
+export interface SpectrumCard { id: string; left: string; right: string; category?: string; }
 
 export interface GameState {
   view: AppView;
@@ -110,9 +112,11 @@ interface MultiplayerState {
 }
 ```
 
-**Helpers:** `setPlayerName`, `hostRoom()` (generates code, sets isHost=true), `joinRoom(code)`, `clearRoom()`, `setIsHost(v)` (used by RoomOrchestrator when host is promoted)
+**Helpers:** `setPlayerName`, `hostRoom()` (generates code, sets isHost=true, pushes `?room=CODE` to URL), `joinRoom(code)` (normalizes code, pushes `?room=CODE` to URL), `clearRoom()` (pushes `/` to URL), `setIsHost(v)` (used by RoomOrchestrator when host is promoted)
 
 **Room code generation:** `Math.random().toString(36).slice(2, 8).toUpperCase()`
+
+**URL sync:** `history.pushState` keeps the URL in sync so joining links work. `JoinOrHostView` reads `?room=` on mount to prefill the join code. `GameRouter` in App.tsx redirects to `joinOrHost` on load if `?room=` is present.
 
 ---
 
@@ -138,8 +142,9 @@ export type Storage = {
   phase: RoomPhase;
   gameMode: GameMode;
   totalRounds: number;
-  clueTimerDuration: number;      // seconds; 0 = no limit
-  cluePhaseStartTime: number | null;
+  clueTimerDuration: number;      // seconds per round; 0 = no limit; scaled by totalRounds in MultiClueView
+  cluePhaseStartTime: number | null;  // Unix ms timestamp set when host starts; used for timer sync across refreshes
+  selectedCategories: string[];   // empty = all categories
   hostId: string;
   players: LiveMap<string, PlayerInfo>;          // id → { name, isHost, color }
   playerDials: LiveMap<string, DialConfig[]>;    // playerId → DialConfig[]
@@ -179,9 +184,12 @@ const ROOM_VIEWS = new Set(["waitingRoom", "multiClue", "multiGuess", "multiResu
 
 function MultiplayerRoom() {
   // Wraps RoomProvider for all in-room views
-  // initialStorage sets phase:"lobby", gameMode:"classic", totalRounds, empty collections
+  // initialStorage sets phase:"lobby", gameMode:"classic", totalRounds, clueTimerDuration:90,
+  //   cluePhaseStartTime:null, selectedCategories:[], empty collections
   // Renders: <RoomOrchestrator /> <RoomNavigator /> + view components
 }
+
+// GameRouter reads ?room= param on mount and navigates to joinOrHost if present
 ```
 
 ---
@@ -201,6 +209,25 @@ const PLAYER_COLORS = [
 ```
 
 Colors shown as dots next to player names in: WaitingRoom, MultiClue status list, MultiGuess guesser list, Results breakdown.
+
+---
+
+## Ellipsis Component (`src/components/ui/ellipsis.tsx`)
+
+Animated ellipsis cycling `.` → `..` → `...` at 500ms. Used for all "waiting/loading" text.
+
+```tsx
+export function Ellipsis() {
+  const [count, setCount] = useState(1);
+  useEffect(() => {
+    const id = setInterval(() => setCount((c) => (c % 3) + 1), 500);
+    return () => clearInterval(id);
+  }, []);
+  return <span aria-hidden="true">{"." .repeat(count)}</span>;
+}
+```
+
+Not used in button labels — only in status/waiting text.
 
 ---
 
@@ -255,8 +282,10 @@ export function calcPoints(dial: number, target: number): number {
 ### WaitingRoom
 - Host enters → `initRoom` mutation fires when storage loads: skips if player already registered (returning after play again), otherwise does full reset (clears all game data, re-registers host with color index 0)
 - Non-hosts: registered via `registerPlayer` (no-op if already registered); enforces **MAX_PLAYERS = 12**
-- Host selects game mode (Classic active, 3D locked/coming soon) and round count
-- Host clicks "Start Game" (requires ≥2 players) → `startGame` sets `phase = "clue"` → host navigates directly; non-hosts follow via `seenLobby` ref pattern
+- Host selects game mode (Classic active, 3D locked/coming soon), round count, clue timer, and card categories
+- Host can kick non-host players — `kickPlayer` mutation removes them from the `players` LiveMap; kick button (×) shown only to host, `cursor-pointer` styled; kicked players are not yet automatically navigated away (to be implemented)
+- Host clicks "Start Game" (requires ≥2 players) → `startGame` sets `cluePhaseStartTime = Date.now()` and `phase = "clue"` → host navigates directly; non-hosts follow via `seenLobby` ref pattern
+- **Copy options:** Two buttons — "Copy Code" (just the code) and "Copy Link" (`${origin}/?room=${code}`)
 
 **Leave Room behavior:**
 - Host + only player → calls `/api/delete-room` (Vite server middleware → Liveblocks REST `DELETE /v2/rooms/{id}`) → navigates; 400ms delay to flush mutation
@@ -265,11 +294,16 @@ export function calcPoints(dial: number, target: number): number {
 
 **Navigation guard:** Hosts NEVER navigate via phase `useEffect` — only via `handleStart`. Non-hosts use `seenLobby` ref.
 
+**Motion animations:** Outer container is a `motion.div` with `staggerChildren: 0.07`; each section is a `motion.div variants={item}` with `hidden: { opacity: 0, y: 12 }` → `show: { opacity: 1, y: 0 }`. `item` is typed as `Variants` and declared at module level (not inside JSX) to avoid TS inference errors.
+
 ### MultiClue
-- On mount, each player calls `savePlayerDials(playerId, pickDials(totalRounds))` to generate random cards + targets. No-op if already set.
+- On mount, each player calls `savePlayerDials(playerId, pickDials(totalRounds, selectedCategories))` to generate random cards + targets. No-op if already set.
+- `pickDials` filters `spectrumCards` by `selectedCategories` if non-empty; caps at available cards: `Math.min(totalRounds, shuffled.length)`
 - Each player sees their own dials with target visible (`hideNeedle=true`) and writes one clue per dial
-- Host watches `playerClues` + `playerDials`; when every player has all clues non-empty, advances to guessing
-- **Clue timer**: configurable in WaitingRoom (30s / 1min / 90s / 2min / No limit). Default: 90s. When timer expires, each client auto-saves their partial local clues to storage, then host waits 2s (grace period) and advances. Only (player, dial) pairs with a non-empty clue are included in the guessing queue — players who wrote nothing are skipped.
+- Host watches `playerClues` + `playerDials`; when every player has all clues non-empty (using actual dial counts), advances to guessing
+- Progress indicator shows "Round X of Y" only — no submitted count (players see status in the player list below)
+- **Clue timer**: configurable in WaitingRoom (30s / 1min / 90s / 2min / No limit). Default: 90s. Scales by `totalRounds` (`effectiveTimerDuration = clueTimerDuration * totalRounds`). Timer is timestamp-based (`Date.now() - cluePhaseStartTime`) so it survives page refreshes. When timer expires, each client auto-saves their partial local clues to storage, then host waits 2s (grace period) and advances. Only (player, dial) pairs with a non-empty clue are included in the guessing queue — players who wrote nothing are skipped.
+- Timer bar color: green → amber (≤30%) → red (≤10%)
 
 **Guessing queue format** — one entry per (dial, author) pair with a non-empty clue:
 ```
@@ -279,25 +313,33 @@ for each dial d:
       push { dialIndex: d, authorId }
 ```
 
-`advanceToGuessing` mutation builds the queue internally from fresh storage, guarding against duplicate calls with `if (phase !== "clue") return`. If the resulting queue is empty (no one wrote any clues), jumps directly to `results`.
+`advanceToGuessing` mutation builds the queue internally from fresh storage, guarding against duplicate calls with `if (phase !== "clue") return`. Uses `maxDials = Math.max(...playerIds.map(id => dialsMap.get(id)?.length ?? 0))` to handle variable dial counts from category filtering. If the resulting queue is empty (no one wrote any clues), jumps directly to `results`.
 
 **Result key format:** `` `${guesserId}-${dialIndex}-${authorId}` ``
 
 ### MultiGuess
 - Works through `guessingQueue[currentGuessIndex]` — each entry is `{ dialIndex, authorId }`
+- **Round counter:** `Round {dialIndex + 1} of {maxDialIndex + 1}` — advances when all players in a dial round are done, not per queue entry
 - All non-authors guess simultaneously by dragging their own needle
-- **Author view:** `hideNeedle=true` + `extraNeedles` showing all guessers' live colored positions from `useOthers` presence (or locked result position once submitted)
-- **Guesser view:** own white needle only (no extra needles); `smooth={false}` for instant drag feedback
+- **Author view:** `hideNeedle=true` + `showTarget=true` always (author always sees zones) + `extraNeedles` showing all guessers' live colored positions from `useOthers` presence (or locked result position once submitted)
+- **Guesser view:** own white needle only (no extra needles until `allGuessersLocked`); `smooth={false}` for instant drag feedback
 - Live needle positions broadcast via `presence.dialPosition` → `useUpdateMyPresence` on every drag
-- `showTarget` only reveals after **all guessers** have locked in (`allGuessersLocked`)
+- `showTarget` reveals for everyone after **all guessers** have locked in (`allGuessersLocked`)
+- After locking in, each guesser sees the status list (who else is still guessing) — condition: `amIAuthor || myLocked || allGuessersLocked`
 - Each guesser locks in independently via `recordGuess` mutation
-- When `allGuessersLocked` → zones reveal for everyone; author clicks **Next** → `advanceGuess` mutation
-- Score points not shown after lock-in — only the visual dial with zones + colored needles
+- When `allGuessersLocked` → zones + all needle positions reveal; author sees score preview (`+N pts`) per guesser; author clicks **Next** → `advanceGuess` mutation
+- **Double-advance prevention:** `isAdvancing` ref (reset on `currentGuessIndex` change) guards both the manual Next button (`handleAdvance`) and the auto-advance timer effect
+- **12s auto-advance:** countdown starts when `allGuessersLocked`; at 0, author auto-calls `advanceGuess()` (guarded by `allGuessersLocked && !isAdvancing.current`); timer resets on `currentGuessIndex` change
+
+**Mutation ordering:** `recordGuess` and `advanceGuess` are declared before `useEffect` hooks to avoid "used before declaration" TS errors.
 
 ### MultiResults
 - Leaderboard: scores summed from `guessResults` keys (parsed as `${guesserId}-${dialIndex}-${authorId}`)
-- Per-dial breakdown: each card shows author/clue, full `SpectrumDial` with `showTarget=true` + `extraNeedles` for all guessers' locked positions, per-player score row
+- **Round Breakdown toggle:** "By Round" (default) or "By Player" — toggles `breakdownView` state
+  - By Round: each (dial, author) card with full SpectrumDial + extraNeedles + per-guesser score row
+  - By Player: per-player card with colored left border; each guess shows dial with their needle + target + `+N pts`
 - **Play Again** (host only): `resetForNewGame` mutation clears game data but **keeps `players` LiveMap** (colors + host preserved) → sets `phase="lobby"` → host navigates to waitingRoom; non-hosts follow via `phase` watch
+- **Leave Game** button: same logic as WaitingRoom leave (delete room if last player, otherwise `leaveRoom` mutation + 400ms delay)
 
 ---
 
@@ -306,11 +348,11 @@ for each dial d:
 | View | Key Elements |
 |---|---|
 | `StartView` | Animated gradient (light/dark variants), light/dark toggle button (top-right, defaults to system), Play → joinOrHost |
-| `JoinOrHostView` | Name input (required), Host / Join (code entry) |
-| `WaitingRoomView` | Room code + copy, Classic/3D mode selector, rounds dropdown (`[1,3,5,7,10]`), clue timer dropdown (30s/1min/90s/2min/No limit), player list with colored dots + Host/You badges, Start Game, Leave Room (with host succession logic) |
-| `MultiClueView` | Countdown timer bar (color shifts amber→red), dial tabs with color dots on status, `SpectrumDial` `showTarget=true hideNeedle=true`, clue input, Submit All Clues; auto-saves partial clues on timer expiry |
-| `MultiGuessView` | Clue display, SpectrumDial (author: extraNeedles for all guessers; guesser: own needle only), Lock In, Next (author after all locked), guesser status list |
-| `MultiResultsView` | Ranked leaderboard with color dots, per-dial SpectrumDial breakdown with all guess needle positions, Play Again (host) / waiting message (non-host) |
+| `JoinOrHostView` | Name input (required), Host / Join (code entry); prefills code from `?room=` URL param |
+| `WaitingRoomView` | Room code + Copy Code / Copy Link, Classic/3D mode selector, rounds dropdown (`[1,2,3,4,5]`), clue timer dropdown (30s/1min/90s/2min/No limit), category filter chips (All + 8 categories), player list with colored dots + Host/You badges + kick (×) for host, Start Game, Leave Room; staggered motion fade-in |
+| `MultiClueView` | Countdown timer bar (color shifts amber→red), round progress ("Round X of Y"), dial tabs, `SpectrumDial` `showTarget=true hideNeedle=true`, clue input, Submit All Clues; auto-saves partial clues on timer expiry; player status list (Ready/Partial/Writing…) |
+| `MultiGuessView` | Round counter by dialIndex, Clue display, SpectrumDial (author: always showTarget + extraNeedles; guesser: own needle, showTarget after all locked), Lock In, guesser status list (visible to locked-in guessers too), score preview after reveal, Next with 12s countdown (author auto-advances) |
+| `MultiResultsView` | Ranked leaderboard with color dots, By Round / By Player breakdown toggle, per-dial SpectrumDial with all guess positions, Play Again (host) / waiting message (non-host), Leave Game |
 
 ---
 
@@ -368,7 +410,21 @@ All `<Button>` components have `cursor-pointer` in the base CVA class.
 
 ## Spectrum Cards (`src/data/spectrumCards.ts`)
 
-43 total cards. Examples: Hot/Cold, Good/Evil, Overrated/Underrated, Niche/Mainstream, Instinct/Logic, Fantasy/Sci-Fi, Chaotic/Orderly, Timeless/Trendy.
+93 total cards, all with categories. 8 categories: `Physical`, `Personality`, `Society`, `Opinion`, `Lifestyle`, `Abstract`, `Morality`, `Pop Culture`.
+
+```ts
+export const CARD_CATEGORIES = ["Physical", "Personality", "Society", "Opinion", "Lifestyle", "Abstract", "Morality", "Pop Culture"];
+```
+
+`SpectrumCard.category` is optional (`category?: string`) to avoid type conflicts when `DialConfig` (which extends the card shape without `category`) is passed to `SpectrumDial`.
+
+---
+
+## Known TypeScript Patterns / Gotchas
+
+- **`useMutation` before `useEffect`:** Any `useMutation` result used inside a `useEffect` must be declared before the effect to avoid "used before declaration" TS errors (block-scoped `const` is not hoisted). Keep all mutations at the top of the component, above effects.
+- **Motion `Variants` type:** Must be explicitly annotated at module level (`const item: Variants = { ... }`), not inferred inside JSX return — otherwise TS can't resolve the type.
+- **`DialConfig` vs `SpectrumCard`:** `DialConfig` adds `targetPosition` but lacks `category`. `SpectrumCard.category` is optional so both types are compatible as `card` prop on `SpectrumDial`.
 
 ---
 

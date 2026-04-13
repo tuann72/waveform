@@ -171,10 +171,6 @@ export function MultiClueView() {
   }, [playerClues, playerDials]);
 
   const myCluesSubmitted = hasSubmitted || timerExpired;
-  const submittedCount = players.filter(([id]) => {
-    const saved = playerClues[id] ?? [];
-    return saved.length > 0 && saved.every((c) => c.trim());
-  }).length;
 
   const timerPercent =
     timerActive && timeLeft !== null && effectiveTimerDuration > 0
@@ -225,12 +221,9 @@ export function MultiClueView() {
         )}
 
         {/* Progress indicator */}
-        <div className="flex justify-between items-center">
+        <div className="flex items-center">
           <span className="text-xs text-muted-foreground">
             Round {currentDial + 1} of {myDials.length}
-          </span>
-          <span className="text-xs text-muted-foreground">
-            {submittedCount}/{players.length} submitted
           </span>
         </div>
 
