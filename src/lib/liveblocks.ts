@@ -40,6 +40,8 @@ export type Storage = {
   phase: RoomPhase;
   gameMode: GameMode;
   totalRounds: number;
+  clueTimerDuration: number;      // seconds; 0 = no limit
+  cluePhaseStartTime: number | null;
   hostId: string;
   players: LiveMap<string, PlayerInfo>;
   playerDials: LiveMap<string, DialConfig[]>;

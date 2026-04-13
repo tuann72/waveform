@@ -94,6 +94,8 @@ function MultiplayerRoom() {
         phase: "lobby",
         gameMode: "classic",
         totalRounds: state.totalRounds,
+        clueTimerDuration: 90,
+        cluePhaseStartTime: null,
         hostId: mp.playerId,
         players: new LiveMap(),
         playerDials: new LiveMap(),

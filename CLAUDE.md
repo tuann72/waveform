@@ -138,6 +138,8 @@ export type Storage = {
   phase: RoomPhase;
   gameMode: GameMode;
   totalRounds: number;
+  clueTimerDuration: number;      // seconds; 0 = no limit
+  cluePhaseStartTime: number | null;
   hostId: string;
   players: LiveMap<string, PlayerInfo>;          // id → { name, isHost, color }
   playerDials: LiveMap<string, DialConfig[]>;    // playerId → DialConfig[]
@@ -266,16 +268,18 @@ export function calcPoints(dial: number, target: number): number {
 ### MultiClue
 - On mount, each player calls `savePlayerDials(playerId, pickDials(totalRounds))` to generate random cards + targets. No-op if already set.
 - Each player sees their own dials with target visible (`hideNeedle=true`) and writes one clue per dial
-- Host watches `playerClues` + `playerDials`; when every player has both, builds `guessingQueue` and sets `phase = "guessing"`
+- Host watches `playerClues` + `playerDials`; when every player has all clues non-empty, advances to guessing
+- **Clue timer**: configurable in WaitingRoom (30s / 1min / 90s / 2min / No limit). Default: 90s. When timer expires, each client auto-saves their partial local clues to storage, then host waits 2s (grace period) and advances. Only (player, dial) pairs with a non-empty clue are included in the guessing queue — players who wrote nothing are skipped.
 
-**Guessing queue format** — one entry per (dial, author) pair; all non-authors guess simultaneously:
+**Guessing queue format** — one entry per (dial, author) pair with a non-empty clue:
 ```
 for each dial d:
   for each authorId:
-    push { dialIndex: d, authorId }
+    if playerClues[authorId][d] is non-empty:
+      push { dialIndex: d, authorId }
 ```
 
-`advanceToGuessing` mutation guards against duplicate calls with `if (phase !== "clue") return`.
+`advanceToGuessing` mutation builds the queue internally from fresh storage, guarding against duplicate calls with `if (phase !== "clue") return`. If the resulting queue is empty (no one wrote any clues), jumps directly to `results`.
 
 **Result key format:** `` `${guesserId}-${dialIndex}-${authorId}` ``
 
@@ -303,8 +307,8 @@ for each dial d:
 |---|---|
 | `StartView` | Animated gradient (light/dark variants), light/dark toggle button (top-right, defaults to system), Play → joinOrHost |
 | `JoinOrHostView` | Name input (required), Host / Join (code entry) |
-| `WaitingRoomView` | Room code + copy, Classic/3D mode selector, rounds dropdown (`[1,3,5,7,10]`), player list with colored dots + Host/You badges, Start Game, Leave Room (with host succession logic) |
-| `MultiClueView` | Dial tabs with color dots on status, `SpectrumDial` `showTarget=true hideNeedle=true`, clue input, Submit All Clues |
+| `WaitingRoomView` | Room code + copy, Classic/3D mode selector, rounds dropdown (`[1,3,5,7,10]`), clue timer dropdown (30s/1min/90s/2min/No limit), player list with colored dots + Host/You badges, Start Game, Leave Room (with host succession logic) |
+| `MultiClueView` | Countdown timer bar (color shifts amber→red), dial tabs with color dots on status, `SpectrumDial` `showTarget=true hideNeedle=true`, clue input, Submit All Clues; auto-saves partial clues on timer expiry |
 | `MultiGuessView` | Clue display, SpectrumDial (author: extraNeedles for all guessers; guesser: own needle only), Lock In, Next (author after all locked), guesser status list |
 | `MultiResultsView` | Ranked leaderboard with color dots, per-dial SpectrumDial breakdown with all guess needle positions, Play Again (host) / waiting message (non-host) |
 

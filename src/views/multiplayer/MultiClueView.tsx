@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation, useUpdateMyPresence } from "@/lib/liveblocks";
@@ -20,18 +20,10 @@ function pickDials(totalRounds: number): DialConfig[] {
   }));
 }
 
-// One entry per (dial, author) pair — all non-authors guess simultaneously
-function buildGuessingQueue(
-  playerIds: string[],
-  totalDials: number,
-): Array<{ dialIndex: number; authorId: string }> {
-  const queue: Array<{ dialIndex: number; authorId: string }> = [];
-  for (let d = 0; d < totalDials; d++) {
-    for (const authorId of playerIds) {
-      queue.push({ dialIndex: d, authorId });
-    }
-  }
-  return queue;
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
 }
 
 export function MultiClueView() {
@@ -44,12 +36,17 @@ export function MultiClueView() {
   const playerDials = useStorage((s) => s ? s.playerDials as Record<string, DialConfig[]> : {} as Record<string, DialConfig[]>) ?? {};
   const playerClues = useStorage((s) => s ? s.playerClues as Record<string, string[]> : {} as Record<string, string[]>) ?? {};
   const phase = useStorage((s) => s?.phase);
+  const clueTimerDuration = useStorage((s) => s?.clueTimerDuration ?? 90) ?? 90;
+  const cluePhaseStartTime = useStorage((s) => s?.cluePhaseStartTime ?? null);
 
   const myDials = playerDials[mp.playerId] ?? [];
 
   const [clues, setClues] = useState<string[]>([]);
   const [currentDial, setCurrentDial] = useState(0);
   const [cluesInitializedFor, setCluesInitializedFor] = useState(0);
+  const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const savedOnExpiryRef = useRef(false);
 
   // Initialize local clues when my dials load
   if (myDials.length > 0 && myDials.length !== cluesInitializedFor) {
@@ -57,9 +54,26 @@ export function MultiClueView() {
     setClues(Array(myDials.length).fill(""));
   }
 
+  const effectiveTimerDuration = clueTimerDuration * totalRounds;
+  const timerActive = clueTimerDuration > 0 && cluePhaseStartTime !== null;
+
+  // Countdown timer
+  useEffect(() => {
+    if (!clueTimerDuration || !cluePhaseStartTime) return;
+    const tick = () => {
+      const elapsed = Math.floor((Date.now() - cluePhaseStartTime) / 1000);
+      setTimeLeft(Math.max(0, effectiveTimerDuration - elapsed));
+    };
+    tick();
+    const interval = setInterval(tick, 500);
+    return () => clearInterval(interval);
+  }, [clueTimerDuration, cluePhaseStartTime, effectiveTimerDuration]);
+  const timerExpired = timerActive && timeLeft === 0;
+
   // Auto-navigate when phase advances
   useEffect(() => {
     if (phase === "guessing") goTo("multiGuess");
+    if (phase === "results") goTo("multiResults");
   }, [phase]);
 
   const savePlayerDials = useMutation(
@@ -77,13 +91,28 @@ export function MultiClueView() {
     [],
   );
 
-  const advanceToGuessing = useMutation(({ storage }, queue: ReturnType<typeof buildGuessingQueue>) => {
-    if (storage.get("phase") !== "clue") return; // already transitioned — ignore duplicate calls
-    const lb = storage.get("guessingQueue");
-    queue.forEach((entry) => lb.push(entry));
-    storage.set("currentGuessIndex", 0);
-    storage.set("phase", "guessing");
-  }, []);
+  // Builds the guessing queue from storage directly (reads fresh state inside mutation)
+  const advanceToGuessing = useMutation(
+    ({ storage }, playerIds: string[], totalDials: number) => {
+      if (storage.get("phase") !== "clue") return;
+      const cluesMap = storage.get("playerClues");
+      const lb = storage.get("guessingQueue");
+
+      for (let d = 0; d < totalDials; d++) {
+        for (const authorId of playerIds) {
+          const authorClues = cluesMap.get(authorId) ?? [];
+          if (authorClues[d]?.trim()) {
+            lb.push({ dialIndex: d, authorId });
+          }
+        }
+      }
+
+      storage.set("currentGuessIndex", 0);
+      // If no one wrote any clues at all, jump straight to results
+      storage.set("phase", lb.length > 0 ? "guessing" : "results");
+    },
+    [],
+  );
 
   // Generate and store this player's random dials once
   useEffect(() => {
@@ -92,30 +121,59 @@ export function MultiClueView() {
     }
   }, [totalRounds]);
 
+  // On timer expiry, auto-save whatever partial clues we have locally
+  useEffect(() => {
+    if (!timerExpired || savedOnExpiryRef.current || hasSubmitted) return;
+    savedOnExpiryRef.current = true;
+    saveClues(mp.playerId, clues);
+    updatePresence({ cluesComplete: true });
+  }, [timerExpired]);
+
+  // Host waits 2s (grace period for saves to propagate) then advances
+  useEffect(() => {
+    if (!mp.isHost || !timerExpired || !players.length) return;
+    const timer = setTimeout(() => {
+      const allPlayerIds = players.map(([id]) => id);
+      advanceToGuessing(allPlayerIds, totalRounds);
+    }, 2000);
+    return () => clearTimeout(timer);
+  }, [timerExpired, mp.isHost, players.length]);
+
   function handleSubmitAll() {
     if (clues.some((c) => !c.trim())) return;
+    setHasSubmitted(true);
     saveClues(mp.playerId, clues);
     updatePresence({ cluesComplete: true });
   }
 
-  // Host advances phase when every player has saved clues AND dials
+  // Host advances when every player has fully submitted (no-timer or before timer fires)
   useEffect(() => {
-    if (!mp.isHost || !players.length) return;
+    if (!mp.isHost || !players.length || timerExpired) return;
     const allPlayerIds = players.map(([id]) => id);
     const allReady = allPlayerIds.every((id) =>
+      (playerDials[id]?.length ?? 0) >= totalRounds &&
       (playerClues[id]?.length ?? 0) >= totalRounds &&
-      (playerDials[id]?.length ?? 0) >= totalRounds,
+      playerClues[id]?.every((c) => c.trim()),
     );
     if (allReady) {
-      const queue = buildGuessingQueue(allPlayerIds, totalRounds);
-      advanceToGuessing(queue);
+      advanceToGuessing(allPlayerIds, totalRounds);
     }
   }, [playerClues, playerDials]);
 
-  const myCluesSubmitted = (playerClues[mp.playerId]?.length ?? 0) >= totalRounds && totalRounds > 0;
-  const submittedCount = players.filter(
-    ([id]) => (playerClues[id]?.length ?? 0) >= totalRounds,
-  ).length;
+  const myCluesSubmitted = hasSubmitted || timerExpired;
+  const submittedCount = players.filter(([id]) => {
+    const saved = playerClues[id] ?? [];
+    return saved.length > 0 && saved.every((c) => c.trim());
+  }).length;
+
+  const timerPercent =
+    timerActive && timeLeft !== null && effectiveTimerDuration > 0
+      ? (timeLeft / effectiveTimerDuration) * 100
+      : 100;
+  const timerBarColor =
+    timerPercent > 30 ? "bg-primary" : timerPercent > 10 ? "bg-amber-500" : "bg-red-500";
+  const timerTextColor =
+    timerPercent <= 10 ? "text-red-500" : timerPercent <= 30 ? "text-amber-500" : "text-foreground";
 
   if (!myDials.length) {
     return (
@@ -137,6 +195,24 @@ export function MultiClueView() {
             Give a clue for each spectrum without saying the exact words
           </p>
         </div>
+
+        {/* Countdown timer */}
+        {timerActive && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-muted-foreground">Time remaining</span>
+              <span className={`text-sm font-mono font-semibold tabular-nums ${timerTextColor}`}>
+                {timerExpired ? "Time's up!" : formatTime(timeLeft ?? 0)}
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div
+                className={`h-full rounded-full transition-all duration-500 ${timerBarColor}`}
+                style={{ width: `${timerPercent}%` }}
+              />
+            </div>
+          </div>
+        )}
 
         {/* Progress indicator */}
         <div className="flex justify-between items-center">
@@ -162,7 +238,7 @@ export function MultiClueView() {
           ))}
         </div>
 
-        {/* Current dial — target shown only once this player's targets are generated */}
+        {/* Current dial — target shown, needle hidden */}
         <SpectrumDial
           card={dial}
           dialPosition={50}
@@ -217,7 +293,9 @@ export function MultiClueView() {
           </div>
         ) : (
           <div className="text-center text-sm text-muted-foreground py-2">
-            Clues submitted! Waiting for others…
+            {timerExpired && !hasSubmitted
+              ? "Time's up! Your clues have been saved."
+              : "Clues submitted! Waiting for others…"}
           </div>
         )}
 
@@ -226,15 +304,17 @@ export function MultiClueView() {
         {/* Player status */}
         <div className="flex flex-col gap-1.5">
           {players.map(([id, info]) => {
-            const done = (playerClues[id]?.length ?? 0) >= myDials.length;
+            const saved = playerClues[id] ?? [];
+            const fullyDone = saved.length > 0 && saved.every((c) => c.trim());
+            const partial = !fullyDone && saved.some((c) => c.trim());
             return (
               <div key={id} className="flex items-center justify-between text-sm">
                 <div className="flex items-center gap-2">
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
                   <span>{info.name}{id === mp.playerId ? " (you)" : ""}</span>
                 </div>
-                <Badge variant={done ? "default" : "outline"}>
-                  {done ? "Ready" : "Writing…"}
+                <Badge variant={fullyDone ? "default" : "outline"}>
+                  {fullyDone ? "Ready" : partial ? "Partial" : "Writing…"}
                 </Badge>
               </div>
             );

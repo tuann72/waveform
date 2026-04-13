@@ -12,6 +12,14 @@ import { ROUND_OPTIONS } from "@/types/game";
 
 const MAX_PLAYERS = 12;
 
+const TIMER_OPTIONS = [
+  { value: 30, label: "30s" },
+  { value: 60, label: "1 min" },
+  { value: 90, label: "90s" },
+  { value: 120, label: "2 min" },
+  { value: 0, label: "No limit" },
+];
+
 const PLAYER_COLORS = [
   "#f87171", "#fb923c", "#facc15", "#4ade80",
   "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9",
@@ -26,6 +34,7 @@ export function WaitingRoomView() {
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const totalRounds = useStorage((s) => s?.totalRounds ?? state.totalRounds);
   const gameMode = useStorage((s) => s?.gameMode ?? "classic");
+  const clueTimerDuration = useStorage((s) => s?.clueTimerDuration ?? 90);
 
   const [copied, setCopied] = useState(false);
   const [leaving, setLeaving] = useState(false);
@@ -96,7 +105,12 @@ export function WaitingRoomView() {
     storage.set("gameMode", mode);
   }, []);
 
+  const setClueTimer = useMutation(({ storage }, duration: number) => {
+    storage.set("clueTimerDuration", duration);
+  }, []);
+
   const startGame = useMutation(({ storage }) => {
+    storage.set("cluePhaseStartTime", Date.now());
     storage.set("phase", "clue");
   }, []);
 
@@ -225,6 +239,25 @@ export function WaitingRoomView() {
             <SelectContent>
               {ROUND_OPTIONS.map((n) => (
                 <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        {/* Clue timer */}
+        <div className="flex items-center gap-3">
+          <Label className="text-sm text-muted-foreground whitespace-nowrap flex-1">Clue Timer</Label>
+          <Select
+            value={String(clueTimerDuration ?? 90)}
+            onValueChange={(v) => setClueTimer(Number(v))}
+            disabled={!mp.isHost}
+          >
+            <SelectTrigger className="w-24">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TIMER_OPTIONS.map(({ value, label }) => (
+                <SelectItem key={value} value={String(value)}>{label}</SelectItem>
               ))}
             </SelectContent>
           </Select>
