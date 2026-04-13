@@ -54,7 +54,8 @@ src/
 │   │   ├── ellipsis.tsx                 ← animated cycling ellipsis (. → .. → ...) at 500ms
 │   │   └── badge, button, card, input, label, select, separator
 │   └── game/
-│       └── SpectrumDial.tsx             ← interactive spectrum dial; supports extraNeedles (colored, for multi-player reveal)
+│       ├── SpectrumDial.tsx             ← interactive spectrum dial; supports extraNeedles (colored, for multi-player reveal)
+│       └── EmojiReactions.tsx          ← hamster reaction picker + floating animation; used in MultiGuess + MultiResults
 └── views/
     ├── StartView.tsx                    ← animated gradient, light/dark toggle (top-right), Play → joinOrHost
     └── multiplayer/
@@ -161,6 +162,8 @@ export type Presence = {
   dialPosition: number | null; // live needle position broadcast during guessing
 };
 ```
+
+**`reaction` presence field:** `{ emoji: string; id: string } | null` — `emoji` stores the hamster image path (e.g. `/hamsters/hamster3.jpg`); `id` is a random string used to detect new reactions vs. unchanged presence. Set on tap, never cleared (stale reactions are ignored via `seenRef` in `EmojiReactions`).
 
 **Room ID:** `waveform-${roomCode}`
 
@@ -428,6 +431,22 @@ export const CARD_CATEGORIES = ["Physical", "Personality", "Society", "Opinion",
 - **Motion `Variants` type:** Must be explicitly annotated at module level (`const item: Variants = { ... }`), not inferred inside JSX return — otherwise TS can't resolve the type.
 - **`DialConfig` vs `SpectrumCard`:** `DialConfig` adds `targetPosition` but lacks `category`. `SpectrumCard.category` is optional so both types are compatible as `card` prop on `SpectrumDial`.
 - **`useStorage` always returns `null` during loading:** Even if the selector returns a default (e.g. `s?.selectedCategories ?? []`), the hook itself returns `null` before storage syncs. Always add `?? fallback` after the `useStorage(...)` call for any value used before `storageLoaded` is true (e.g. `useStorage((s) => s?.selectedCategories ?? []) ?? []`).
+
+---
+
+## Hamster Reactions (`src/components/game/EmojiReactions.tsx`)
+
+Live reactions available during MultiGuess and MultiResults phases. 12 hamster images stored in `public/hamsters/hamster{1-12}.jpg`.
+
+**How it works:**
+- Player taps a hamster → `updateMyPresence({ reaction: { emoji: "/hamsters/hamsterN.jpg", id: <random> } })`
+- Local floater spawns immediately (no round-trip wait)
+- Other clients watch `useOthers()` → detect new `reaction.id` per player via `seenRef` → spawn their own floater
+- Floater animates: `y: -42vh` over **4.5s** (easeOut), opacity 0 over **3.2s** (linear) — fades out before crossing the action text area
+- Fixed random x-position (5–85% from left) per floater; circle-cropped `w-12 h-12`
+- `onAnimationComplete` removes floater from state
+
+**Picker bar:** Fixed to viewport bottom (`z-40`), `overflow-x-auto` for small screens. Views using this component add `pb-20`/`pb-24` to prevent content overlap.
 
 ---
 

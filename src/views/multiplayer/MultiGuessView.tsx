@@ -7,6 +7,7 @@ import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
 import { calcPoints } from "@/lib/scoring";
 import { Ellipsis } from "@/components/ui/ellipsis";
+import { EmojiReactions } from "@/components/game/EmojiReactions";
 
 export function MultiGuessView() {
   const { goTo } = useGame();
@@ -164,7 +165,8 @@ export function MultiGuessView() {
   const totalDialRounds = Math.max(...queue.map((e) => e.dialIndex)) + 1;
 
   return (
-    <div className="h-screen overflow-hidden flex flex-col items-center justify-center gap-6 bg-background px-4 py-8">
+    <div className="h-screen overflow-hidden flex flex-col items-center justify-center gap-6 bg-background px-4 py-8 pb-20">
+      <EmojiReactions />
       <div className="w-full max-w-sm flex flex-col gap-5">
         {/* Header */}
         <div className="text-center">

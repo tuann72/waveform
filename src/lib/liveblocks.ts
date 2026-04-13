@@ -32,6 +32,7 @@ export type Presence = {
   cluesComplete: boolean;
   playerId: string | null;
   dialPosition: number | null;
+  reaction: { emoji: string; id: string } | null;
 };
 
 export type GameMode = "classic" | "3d";

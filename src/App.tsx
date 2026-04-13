@@ -89,7 +89,7 @@ function MultiplayerRoom() {
   return (
     <RoomProvider
       id={`waveform-${mp.roomCode}`}
-      initialPresence={{ playerName: mp.playerName, cluesComplete: false, playerId: mp.playerId, dialPosition: null }}
+      initialPresence={{ playerName: mp.playerName, cluesComplete: false, playerId: mp.playerId, dialPosition: null, reaction: null }}
       initialStorage={{
         phase: "lobby",
         gameMode: "classic",

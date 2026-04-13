@@ -4,6 +4,7 @@ import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation, clearGameData } from "@/lib/liveblocks";
 import type { DialConfig } from "@/lib/liveblocks";
 import { useLeaveRoom } from "@/hooks/useLeaveRoom";
+import { EmojiReactions } from "@/components/game/EmojiReactions";
 import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -62,7 +63,8 @@ export function MultiResultsView() {
   }, []);
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4 py-8">
+    <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4 py-8 pb-24">
+      <EmojiReactions />
       <div className="w-full max-w-sm flex flex-col gap-6">
         {/* Header */}
         <div className="text-center">
