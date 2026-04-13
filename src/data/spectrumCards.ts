@@ -1,0 +1,28 @@
+import type { SpectrumCard } from '@/types/game'
+
+export const spectrumCards: SpectrumCard[] = [
+  { id: 'hot-cold',               left: 'Hot',          right: 'Cold'          },
+  { id: 'loud-quiet',             left: 'Loud',         right: 'Quiet'         },
+  { id: 'fast-slow',              left: 'Fast',         right: 'Slow'          },
+  { id: 'good-evil',              left: 'Good',         right: 'Evil'          },
+  { id: 'big-small',              left: 'Big',          right: 'Small'         },
+  { id: 'old-new',                left: 'Old',          right: 'New'           },
+  { id: 'ugly-beautiful',         left: 'Ugly',         right: 'Beautiful'     },
+  { id: 'weak-powerful',          left: 'Weak',         right: 'Powerful'      },
+  { id: 'cheap-expensive',        left: 'Cheap',        right: 'Expensive'     },
+  { id: 'boring-exciting',        left: 'Boring',       right: 'Exciting'      },
+  { id: 'safe-dangerous',         left: 'Safe',         right: 'Dangerous'     },
+  { id: 'rare-common',            left: 'Rare',         right: 'Common'        },
+  { id: 'formal-casual',          left: 'Formal',       right: 'Casual'        },
+  { id: 'natural-artificial',     left: 'Natural',      right: 'Artificial'    },
+  { id: 'simple-complex',         left: 'Simple',       right: 'Complex'       },
+  { id: 'dark-bright',            left: 'Dark',         right: 'Bright'        },
+  { id: 'healthy-unhealthy',      left: 'Healthy',      right: 'Unhealthy'     },
+  { id: 'fictional-real',         left: 'Fictional',    right: 'Real'          },
+  { id: 'serious-funny',          left: 'Serious',      right: 'Funny'         },
+  { id: 'rigid-flexible',         left: 'Rigid',        right: 'Flexible'      },
+  { id: 'pessimistic-optimistic', left: 'Pessimistic',  right: 'Optimistic'    },
+  { id: 'amateur-expert',         left: 'Amateur',      right: 'Expert'        },
+  { id: 'literal-metaphorical',   left: 'Literal',      right: 'Metaphorical'  },
+  { id: 'ugly-cute',              left: 'Ugly',         right: 'Cute'          },
+]
