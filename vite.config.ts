@@ -15,6 +15,29 @@ export default defineConfig(({ mode }) => {
         name: 'liveblocks-api',
         configureServer(server) {
           server.middlewares.use(async (req, res, next) => {
+            // POST /api/log — debug connection events, prints to terminal
+            if (req.url?.startsWith('/api/log') && req.method === 'POST') {
+              let body = ''
+              req.on('data', (chunk) => { body += chunk })
+              req.on('end', () => {
+                try {
+                  const { event, name, roomId, total } = JSON.parse(body)
+                  if (event === 'connect') {
+                    console.log(`[room] → JOIN   ${String(name).padEnd(20)} room=${roomId}`)
+                  } else if (event === 'disconnect') {
+                    console.log(`[room] ← LEAVE  ${String(name).padEnd(20)} room=${roomId}`)
+                  } else if (event === 'count') {
+                    console.log(`[room] ● total  ${String(total).padEnd(20)} room=${roomId}`)
+                  }
+                } catch {
+                  console.log('[room] log parse error:', body)
+                }
+                res.statusCode = 204
+                res.end()
+              })
+              return
+            }
+
             if (!req.url?.startsWith('/api/delete-room') || req.method !== 'DELETE') {
               next()
               return

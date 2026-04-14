@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { ChevronDown, ChevronRight } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation, clearGameData } from "@/lib/liveblocks";
@@ -16,6 +17,24 @@ export function MultiResultsView() {
   const { mp } = useMultiplayer();
   const { leaving, handleLeave } = useLeaveRoom();
   const [breakdownView, setBreakdownView] = useState<"round" | "player">("round");
+  const [closedRounds, setClosedRounds] = useState(new Set<string>());
+  const [closedPlayers, setClosedPlayers] = useState(new Set<string>());
+
+  function toggleRound(key: string) {
+    setClosedRounds((prev) => {
+      const next = new Set(prev);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  }
+
+  function togglePlayer(id: string) {
+    setClosedPlayers((prev) => {
+      const next = new Set(prev);
+      next.has(id) ? next.delete(id) : next.add(id);
+      return next;
+    });
+  }
 
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const queue = useStorage((s) => s ? [...s.guessingQueue] : []) ?? [];
@@ -119,6 +138,8 @@ export function MultiResultsView() {
           </div>
 
           {breakdownView === "round" && breakdownEntries.map(({ dialIndex, authorId }) => {
+            const key = `${dialIndex}-${authorId}`;
+            const isOpen = !closedRounds.has(key);
             const dial = playerDials[authorId]?.[dialIndex];
             const authorInfo = players.find(([id]) => id === authorId)?.[1];
             const authorName = authorInfo?.name ?? "?";
@@ -129,43 +150,54 @@ export function MultiResultsView() {
               return res ? [{ position: res.position, color: ginfo.color }] : [];
             });
             return (
-              <div key={`${dialIndex}-${authorId}`} className="rounded-lg border p-3 flex flex-col gap-2">
-                <div className="flex items-center justify-between text-xs text-muted-foreground">
-                  <div className="flex items-center gap-1">
+              <div key={key} className="rounded-xl border overflow-hidden">
+                <button
+                  onClick={() => toggleRound(key)}
+                  className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors cursor-pointer"
+                >
+                  <div className="flex items-center gap-1.5">
                     {authorInfo && <span className="w-1.5 h-1.5 rounded-full" style={{ background: authorInfo.color }} />}
-                    <span>by {authorName}</span>
+                    <span>Round {dialIndex + 1} · {authorName}</span>
                   </div>
-                  <p className="text-sm font-medium">"{clue}"</p>
-                </div>
-                {dial && (
-                  <SpectrumDial
-                    card={dial}
-                    dialPosition={50}
-                    onDialChange={() => {}}
-                    showTarget={true}
-                    targetPosition={dial.targetPosition}
-                    disabled={true}
-                    hideNeedle={true}
-                    extraNeedles={extraNeedles}
-                  />
+                  <div className="flex items-center gap-2">
+                    <span className="text-xs text-muted-foreground">"{clue}"</span>
+                    {isOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t p-3 flex flex-col gap-2">
+                    {dial && (
+                      <SpectrumDial
+                        card={dial}
+                        dialPosition={50}
+                        onDialChange={() => {}}
+                        showTarget={true}
+                        targetPosition={dial.targetPosition}
+                        disabled={true}
+                        hideNeedle={true}
+                        extraNeedles={extraNeedles}
+                      />
+                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {guessers.map(([gid, ginfo]) => {
+                        const res = guessResults[`${gid}-${dialIndex}-${authorId}`];
+                        return (
+                          <div key={gid} className="flex items-center gap-1 text-xs">
+                            <span className="w-1.5 h-1.5 rounded-full" style={{ background: ginfo.color }} />
+                            <span className="text-muted-foreground">{ginfo.name}:</span>
+                            <span className="font-medium">+{res?.points ?? 0}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  </div>
                 )}
-                <div className="flex flex-wrap gap-2">
-                  {guessers.map(([gid, ginfo]) => {
-                    const res = guessResults[`${gid}-${dialIndex}-${authorId}`];
-                    return (
-                      <div key={gid} className="flex items-center gap-1 text-xs">
-                        <span className="w-1.5 h-1.5 rounded-full" style={{ background: ginfo.color }} />
-                        <span className="text-muted-foreground">{ginfo.name}:</span>
-                        <span className="font-medium">+{res?.points ?? 0}</span>
-                      </div>
-                    );
-                  })}
-                </div>
               </div>
             );
           })}
 
           {breakdownView === "player" && ranked.map(([playerId, playerInfo]) => {
+            const isOpen = !closedPlayers.has(playerId);
             const myGuesses = breakdownEntries
               .filter(({ authorId }) => authorId !== playerId)
               .map(({ dialIndex, authorId }) => {
@@ -186,39 +218,49 @@ export function MultiResultsView() {
               }[];
 
             return (
-              <div key={playerId} className="rounded-lg border p-3 flex flex-col gap-3">
-                <div className="flex items-center justify-between">
+              <div key={playerId} className="rounded-xl border overflow-hidden">
+                <button
+                  onClick={() => togglePlayer(playerId)}
+                  className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer"
+                >
                   <div className="flex items-center gap-2">
                     <span className="w-2 h-2 rounded-full" style={{ background: playerInfo.color }} />
                     <span className="text-sm font-medium">{playerInfo.name}{playerId === mp.playerId ? " (you)" : ""}</span>
                   </div>
-                  <span className="text-sm font-bold">{scoreMap[playerId] ?? 0} pts</span>
-                </div>
-                {myGuesses.map(({ dialIndex, authorId, result, dial, authorInfo, clue }) => (
-                  <div key={`${dialIndex}-${authorId}`} className="flex flex-col gap-1.5 pl-4 border-l-2" style={{ borderColor: playerInfo.color + "60" }}>
-                    <div className="flex items-center justify-between text-xs text-muted-foreground">
-                      <div className="flex items-center gap-1">
-                        {authorInfo && <span className="w-1.5 h-1.5 rounded-full" style={{ background: authorInfo.color }} />}
-                        <span>{authorInfo?.name ?? "?"}'s clue: "{clue}"</span>
+                  <div className="flex items-center gap-2">
+                    <span className="text-sm font-bold">{scoreMap[playerId] ?? 0} pts</span>
+                    {isOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+                  </div>
+                </button>
+                {isOpen && (
+                  <div className="border-t flex flex-col gap-3 p-4">
+                    {myGuesses.map(({ dialIndex, authorId, result, dial, authorInfo, clue }) => (
+                      <div key={`${dialIndex}-${authorId}`} className="flex flex-col gap-1.5 pl-4 border-l-2" style={{ borderColor: playerInfo.color + "60" }}>
+                        <div className="flex items-center justify-between text-xs text-muted-foreground">
+                          <div className="flex items-center gap-1">
+                            {authorInfo && <span className="w-1.5 h-1.5 rounded-full" style={{ background: authorInfo.color }} />}
+                            <span>{authorInfo?.name ?? "?"}'s clue: "{clue}"</span>
+                          </div>
+                          <span className="font-semibold text-foreground">+{result.points} pt{result.points !== 1 ? "s" : ""}</span>
+                        </div>
+                        {dial && (
+                          <SpectrumDial
+                            card={dial}
+                            dialPosition={result.position}
+                            onDialChange={() => {}}
+                            showTarget={true}
+                            targetPosition={dial.targetPosition}
+                            disabled={true}
+                            hideNeedle={false}
+                            smooth={true}
+                          />
+                        )}
                       </div>
-                      <span className="font-semibold text-foreground">+{result.points} pt{result.points !== 1 ? "s" : ""}</span>
-                    </div>
-                    {dial && (
-                      <SpectrumDial
-                        card={dial}
-                        dialPosition={result.position}
-                        onDialChange={() => {}}
-                        showTarget={true}
-                        targetPosition={dial.targetPosition}
-                        disabled={true}
-                        hideNeedle={false}
-                        smooth={true}
-                      />
+                    ))}
+                    {myGuesses.length === 0 && (
+                      <p className="text-xs text-muted-foreground">No guesses recorded</p>
                     )}
                   </div>
-                ))}
-                {myGuesses.length === 0 && (
-                  <p className="text-xs text-muted-foreground pl-4">No guesses recorded</p>
                 )}
               </div>
             );

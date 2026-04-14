@@ -168,11 +168,14 @@ export function WaitingRoomView() {
     if (phase === "clue" && seenLobby.current) goTo("multiClue");
   }, [phase, goTo, mp.isHost]);
 
+  const playersRef = useRef(players);
+  useEffect(() => { playersRef.current = players; }, [players]);
+
   // Warn non-hosts if no host appears after a timeout — likely a bad room code
   useEffect(() => {
     if (!storageLoaded || mp.isHost) return;
     const timer = setTimeout(() => {
-      const hasHost = players.some(([, info]) => info.isHost);
+      const hasHost = playersRef.current.some(([, info]) => info.isHost);
       if (!hasHost) setNoHostFound(true);
     }, NO_HOST_TIMEOUT_MS);
     return () => clearTimeout(timer);

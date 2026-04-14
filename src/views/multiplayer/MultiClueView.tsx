@@ -268,20 +268,26 @@ export function MultiClueView() {
         {/* Clue input */}
         {!myCluesSubmitted ? (
           <div className="flex flex-col gap-2">
-            <Input
-              key={currentDial}
-              placeholder={`Clue for "${dial.left} ↔ ${dial.right}"`}
-              value={clues[currentDial] ?? ""}
-              onChange={(e) => {
-                const next = [...clues];
-                next[currentDial] = e.target.value;
-                setClues(next);
-              }}
-              onKeyDown={(e) => {
-                if (e.key === "Enter" && currentDial < myDials.length - 1) setCurrentDial((n) => n + 1);
-              }}
-              autoFocus
-            />
+            <div className="flex flex-col gap-1">
+              <Input
+                key={currentDial}
+                placeholder={`Clue for "${dial.left} ↔ ${dial.right}"`}
+                value={clues[currentDial] ?? ""}
+                maxLength={30}
+                onChange={(e) => {
+                  const next = [...clues];
+                  next[currentDial] = e.target.value;
+                  setClues(next);
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && currentDial < myDials.length - 1) setCurrentDial((n) => n + 1);
+                }}
+                autoFocus
+              />
+              <span className="text-xs text-muted-foreground text-right">
+                {(clues[currentDial] ?? "").length}/30
+              </span>
+            </div>
             <div className="flex gap-2">
               {currentDial > 0 && (
                 <Button variant="outline" className="flex-1" onClick={() => setCurrentDial((n) => n - 1)}>

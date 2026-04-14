@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { LiveList, LiveMap } from "@liveblocks/client";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GameProvider, useGame } from "@/context/GameContext";
@@ -16,12 +16,39 @@ import { ColorformResultsView } from "@/views/multiplayer/ColorformResultsView";
 
 const ROOM_VIEWS = new Set(["waitingRoom", "multiClue", "multiGuess", "multiResults"]);
 
+function postLog(event: 'connect' | 'disconnect', name: string, roomId: string, total: number) {
+  fetch('/api/log', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ event, name, roomId, total }),
+  }).catch(() => {}) // dev-only, ignore failures in prod
+}
+
 // Runs inside RoomProvider — handles host promotion when the host disconnects
 function RoomOrchestrator() {
   const { mp, setIsHost } = useMultiplayer();
   const others = useOthers();
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const hostId = useStorage((s) => s?.hostId);
+  const roomId = `waveform-${mp.roomCode}`;
+
+  // Log own connect on mount, disconnect on unmount
+  useEffect(() => {
+    postLog('connect', mp.playerName, roomId, 0)
+    return () => postLog('disconnect', mp.playerName, roomId, 0)
+  }, []);
+
+  // Track others changes to report accurate total (fires after presence syncs)
+  const prevOthersCount = useRef(-1);
+  useEffect(() => {
+    if (others.length === prevOthersCount.current) return;
+    prevOthersCount.current = others.length;
+    fetch('/api/log', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ event: 'count', name: mp.playerName, roomId, total: others.length + 1 }),
+    }).catch(() => {});
+  }, [others.length]);
 
   // Promote a new host atomically — no-op if already promoted by another client
   const promoteToHost = useMutation(({ storage }, oldHostId: string, newHostId: string) => {
