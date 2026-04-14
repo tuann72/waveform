@@ -1,4 +1,4 @@
-import { createContext, useContext, useReducer, type ReactNode } from 'react'
+import { createContext, useContext, useReducer, useCallback, type ReactNode } from 'react'
 import { DEFAULT_ROUNDS, type AppView, type GameState } from '@/types/game'
 import { SESSION_KEY } from '@/context/MultiplayerContext'
 
@@ -15,6 +15,7 @@ function getInitialView(): AppView {
       if (roomCode) return 'waitingRoom'
     }
   } catch {}
+  if (new URLSearchParams(window.location.search).get('room')) return 'joinOrHost'
   return 'start'
 }
 
@@ -47,12 +48,16 @@ export function GameProvider({ children }: { children: ReactNode }) {
     totalRounds: DEFAULT_ROUNDS,
   }))
 
+  const goTo = useCallback((view: AppView) => dispatch({ type: 'SET_VIEW', view }), [])
+  const setTotalRounds = useCallback((totalRounds: number) => dispatch({ type: 'SET_TOTAL_ROUNDS', totalRounds }), [])
+  const resetGame = useCallback(() => dispatch({ type: 'RESET_GAME' }), [])
+
   const value: GameContextValue = {
     state,
     dispatch,
-    goTo: (view) => dispatch({ type: 'SET_VIEW', view }),
-    setTotalRounds: (totalRounds) => dispatch({ type: 'SET_TOTAL_ROUNDS', totalRounds }),
-    resetGame: () => dispatch({ type: 'RESET_GAME' }),
+    goTo,
+    setTotalRounds,
+    resetGame,
   }
 
   return <GameContext.Provider value={value}>{children}</GameContext.Provider>

@@ -88,7 +88,7 @@ export function MultiClueView() {
   useEffect(() => {
     if (phase === "guessing") goTo("multiGuess");
     if (phase === "results") goTo("multiResults");
-  }, [phase]);
+  }, [phase, goTo]);
 
   const savePlayerDials = useMutation(
     ({ storage }, playerId: string, dials: DialConfig[]) => {

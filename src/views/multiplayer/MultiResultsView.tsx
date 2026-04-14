@@ -27,7 +27,7 @@ export function MultiResultsView() {
   // Non-hosts follow when host resets to lobby
   useEffect(() => {
     if (!mp.isHost && phase === "lobby") goTo("waitingRoom");
-  }, [phase]);
+  }, [phase, goTo, mp.isHost]);
 
   // Reset game data but keep players (colors + host status intact)
   const resetForNewGame = useMutation(({ storage }) => {

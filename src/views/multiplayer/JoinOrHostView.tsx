@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { Button } from "@/components/ui/button";
@@ -8,22 +8,18 @@ import { Label } from "@/components/ui/label";
 export function JoinOrHostView() {
   const { goTo } = useGame();
   const { mp, setPlayerName, hostRoom, joinRoom } = useMultiplayer();
-  const [showJoin, setShowJoin] = useState(false);
-  const [code, setCode] = useState("");
+  // Pre-fill code from URL param (e.g. /?room=AB12CD) via lazy initializers
+  const [showJoin, setShowJoin] = useState(() => {
+    return !!new URLSearchParams(window.location.search).get("room");
+  });
+  const [code, setCode] = useState(() => {
+    const p = new URLSearchParams(window.location.search).get("room");
+    return p ? p.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) : "";
+  });
   const [nameError, setNameError] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
   const nameValid = mp.playerName.trim().length > 0;
-
-  // Pre-fill code from URL param (e.g. /?room=AB12CD)
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const roomParam = params.get("room");
-    if (roomParam) {
-      setCode(roomParam.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6));
-      setShowJoin(true);
-    }
-  }, []);
 
   function requireName() {
     if (!nameValid) {

@@ -35,7 +35,7 @@ export type Presence = {
   reaction: { emoji: string; id: string } | null;
 };
 
-export type GameMode = "classic" | "3d";
+export type GameMode = "classic" | "3d" | "colorform";
 
 export type Storage = {
   phase: RoomPhase;
@@ -51,6 +51,9 @@ export type Storage = {
   guessingQueue: LiveList<GuessEntry>;
   currentGuessIndex: number;
   guessResults: LiveMap<string, GuessResult>;
+  // Colorform-specific fields
+  playerColors: LiveMap<string, number[]>;    // playerId → chosen palette index per round
+  colorOptions: LiveMap<string, number[][]>;  // playerId → [[opt,opt,opt], ...] per round
 };
 
 // Clears all per-game data from storage. Does NOT touch players, gameMode,
@@ -67,6 +70,10 @@ export function clearGameData(storage: LiveObject<Storage>) {
   for (const k of guessResults.keys()) guessResults.delete(k);
   const guessingQueue = storage.get("guessingQueue");
   while (guessingQueue.length > 0) guessingQueue.delete(0);
+  const playerColors = storage.get("playerColors");
+  for (const k of playerColors.keys()) playerColors.delete(k);
+  const colorOptions = storage.get("colorOptions");
+  for (const k of colorOptions.keys()) colorOptions.delete(k);
 }
 
 const client = createClient({

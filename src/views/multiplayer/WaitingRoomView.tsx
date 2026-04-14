@@ -92,7 +92,7 @@ export function WaitingRoomView() {
     if (mp.isHost) return; // host navigates explicitly via Start Game button
     if (phase === "lobby") { seenLobby.current = true; return; }
     if (phase === "clue" && seenLobby.current) goTo("multiClue");
-  }, [phase]);
+  }, [phase, goTo, mp.isHost]);
 
   // Warn non-hosts if no host appears after a timeout — likely a bad room code
   useEffect(() => {
@@ -190,11 +190,11 @@ export function WaitingRoomView() {
         {/* Game mode selection */}
         <motion.div variants={item} className="flex flex-col gap-3">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Game Mode</p>
-          <div className="grid grid-cols-2 gap-2">
+          <div className="grid grid-cols-3 gap-2">
             <button
               onClick={() => mp.isHost && setGameMode("classic")}
               disabled={!mp.isHost}
-              className={`rounded-lg border-2 px-4 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
+              className={`rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
                 gameMode === "classic"
                   ? "border-primary bg-primary/10 text-foreground"
                   : "border-border text-muted-foreground hover:border-primary/50"
@@ -202,10 +202,21 @@ export function WaitingRoomView() {
             >
               Classic
             </button>
+            <button
+              onClick={() => mp.isHost && setGameMode("colorform")}
+              disabled={!mp.isHost}
+              className={`rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
+                gameMode === "colorform"
+                  ? "border-primary bg-primary/10 text-foreground"
+                  : "border-border text-muted-foreground hover:border-primary/50"
+              }`}
+            >
+              Colorform
+            </button>
             <div className="relative">
               <button
                 disabled
-                className="w-full rounded-lg border-2 border-border px-4 py-3 text-sm font-medium opacity-50 cursor-not-allowed"
+                className="w-full rounded-lg border-2 border-border px-3 py-3 text-sm font-medium opacity-50 cursor-not-allowed"
               >
                 3D Mode
               </button>
@@ -257,8 +268,8 @@ export function WaitingRoomView() {
           </Select>
         </motion.div>
 
-        {/* Card categories */}
-        <motion.div variants={item} className="flex flex-col gap-2">
+        {/* Card categories — not applicable in Colorform mode */}
+        {gameMode !== "colorform" && <motion.div variants={item} className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm text-muted-foreground">Card Categories</Label>
             <span className="text-xs text-muted-foreground">
@@ -292,7 +303,7 @@ export function WaitingRoomView() {
               </button>
             ))}
           </div>
-        </motion.div>
+        </motion.div>}
 
         <motion.div variants={item}><Separator /></motion.div>
 

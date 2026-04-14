@@ -11,24 +11,20 @@ const GRADIENTS = {
 
 function useResolvedTheme(): "light" | "dark" {
   const { theme } = useTheme();
-  const [resolved, setResolved] = useState<"light" | "dark">(() => {
-    if (theme !== "system") return theme;
-    return window.matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light";
-  });
+  const [systemDark, setSystemDark] = useState(() =>
+    window.matchMedia("(prefers-color-scheme: dark)").matches
+  );
 
   useEffect(() => {
-    if (theme !== "system") {
-      setResolved(theme);
-      return;
-    }
+    if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    setResolved(mq.matches ? "dark" : "light");
-    const handler = (e: MediaQueryListEvent) => setResolved(e.matches ? "dark" : "light");
+    const handler = (e: MediaQueryListEvent) => setSystemDark(e.matches);
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, [theme]);
 
-  return resolved;
+  if (theme !== "system") return theme;
+  return systemDark ? "dark" : "light";
 }
 
 export function StartView() {

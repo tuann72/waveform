@@ -10,6 +10,9 @@ import { WaitingRoomView } from "@/views/multiplayer/WaitingRoomView";
 import { MultiClueView } from "@/views/multiplayer/MultiClueView";
 import { MultiGuessView } from "@/views/multiplayer/MultiGuessView";
 import { MultiResultsView } from "@/views/multiplayer/MultiResultsView";
+import { ColorformClueView } from "@/views/multiplayer/ColorformClueView";
+import { ColorformGuessView } from "@/views/multiplayer/ColorformGuessView";
+import { ColorformResultsView } from "@/views/multiplayer/ColorformResultsView";
 
 const ROOM_VIEWS = new Set(["waitingRoom", "multiClue", "multiGuess", "multiResults"]);
 
@@ -77,8 +80,28 @@ function RoomNavigator() {
     else if (phase === "guessing") goTo("multiGuess");
     else if (phase === "results") goTo("multiResults");
     // phase === "lobby" → stay in waitingRoom
-  }, [storageLoaded, phase]);
+  }, [storageLoaded, phase, goTo, state.view]);
 
+  return null;
+}
+
+// Renders the correct view for the current phase, switching on gameMode for Colorform.
+// Must be inside RoomProvider so it can read gameMode from Liveblocks storage.
+function InRoomViews() {
+  const { state } = useGame();
+  const gameMode = useStorage((s) => s?.gameMode ?? "classic");
+
+  if (state.view === "waitingRoom") return <WaitingRoomView />;
+
+  if (gameMode === "colorform") {
+    if (state.view === "multiClue") return <ColorformClueView />;
+    if (state.view === "multiGuess") return <ColorformGuessView />;
+    if (state.view === "multiResults") return <ColorformResultsView />;
+  }
+
+  if (state.view === "multiClue") return <MultiClueView />;
+  if (state.view === "multiGuess") return <MultiGuessView />;
+  if (state.view === "multiResults") return <MultiResultsView />;
   return null;
 }
 
@@ -104,25 +127,19 @@ function MultiplayerRoom() {
         guessingQueue: new LiveList([]),
         currentGuessIndex: 0,
         guessResults: new LiveMap(),
+        playerColors: new LiveMap(),
+        colorOptions: new LiveMap(),
       }}
     >
       <RoomOrchestrator />
       <RoomNavigator />
-      {state.view === "waitingRoom" && <WaitingRoomView />}
-      {state.view === "multiClue" && <MultiClueView />}
-      {state.view === "multiGuess" && <MultiGuessView />}
-      {state.view === "multiResults" && <MultiResultsView />}
+      <InRoomViews />
     </RoomProvider>
   );
 }
 
 function GameRouter() {
-  const { state, goTo } = useGame();
-
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    if (params.get("room") && state.view === "start") goTo("joinOrHost");
-  }, []);
+  const { state } = useGame();
 
   if (ROOM_VIEWS.has(state.view)) return <MultiplayerRoom />;
 

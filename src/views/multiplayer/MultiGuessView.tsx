@@ -80,7 +80,7 @@ export function MultiGuessView() {
 
   useEffect(() => {
     if (phase === "results") goTo("multiResults");
-  }, [phase]);
+  }, [phase, goTo]);
 
   useEffect(() => {
     document.body.style.overflow = "hidden";
@@ -89,15 +89,17 @@ export function MultiGuessView() {
 
   // Start 12s countdown when all guessers lock in; author auto-advances at 0
   useEffect(() => {
-    if (!allGuessersLocked) {
-      setAutoAdvanceTimer(null);
-      return;
-    }
-    setAutoAdvanceTimer(12);
+    if (!allGuessersLocked) return;
+    const DURATION = 12;
+    const startTime = Date.now();
     const interval = setInterval(() => {
-      setAutoAdvanceTimer((t) => (t !== null && t > 0 ? t - 1 : 0));
-    }, 1000);
-    return () => clearInterval(interval);
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setAutoAdvanceTimer(Math.max(0, DURATION - elapsed));
+    }, 200);
+    return () => {
+      clearInterval(interval);
+      setAutoAdvanceTimer(null);
+    };
   }, [allGuessersLocked, currentGuessIndex]);
 
   useEffect(() => {
