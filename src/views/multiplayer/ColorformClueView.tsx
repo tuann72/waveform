@@ -239,7 +239,7 @@ export function ColorformClueView() {
         <div className="text-center">
           <h2 className="text-xl font-semibold">Pick & Describe</h2>
           <p className="text-sm text-muted-foreground mt-1">
-            Choose a color, then give a one-word clue
+            Choose a color, then give a clue
           </p>
         </div>
 

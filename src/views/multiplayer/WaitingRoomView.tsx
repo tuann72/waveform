@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { ChevronDown } from "lucide-react";
 import { motion, type Variants } from "motion/react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
@@ -13,6 +14,7 @@ import { Label } from "@/components/ui/label";
 import { ROUND_OPTIONS } from "@/types/game";
 import { CARD_CATEGORIES } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
+import { QRCodeSVG } from "qrcode.react";
 import { COLOR_PALETTE, COLOR_PALETTE_DEUTERANOMALY, PALETTE_COLS } from "@/lib/colorPalette";
 import type { PaletteName } from "@/lib/colorPalette";
 
@@ -30,6 +32,57 @@ function MiniPalettePreview({ palette }: { palette: readonly string[] }) {
       {palette.map((color, i) => (
         <div key={i} style={{ background: color, aspectRatio: "1" }} />
       ))}
+    </div>
+  );
+}
+
+const INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = {
+  classic: {
+    title: "Classic",
+    steps: [
+      "Each player sees a spectrum dial (e.g. Hot ↔ Cold) with a hidden target zone.",
+      "Write a clue that hints at where the target sits on the dial.",
+      "Everyone else drags the needle to their best guess.",
+      "Closer guesses score more points — bullseye scores 4.",
+    ],
+  },
+  colorform: {
+    title: "Colorform",
+    steps: [
+      "You're shown 3 color swatches — pick one and write a clue for it.",
+      "Everyone else taps the color they think you picked on a 32×16 color grid.",
+      "Exact match scores 3 pts · 1 cell away scores 2 pts · 2 cells away scores 1 pt.",
+    ],
+  },
+};
+
+function HowToPlayCollapsible({ mode }: { mode: string }) {
+  const [open, setOpen] = useState(false);
+  const info = INSTRUCTIONS[mode] ?? INSTRUCTIONS.classic;
+
+  return (
+    <div>
+      <button
+        onClick={() => setOpen((v) => !v)}
+        className="w-full flex items-center justify-between gap-2 px-3 py-2 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-sm text-muted-foreground cursor-pointer"
+      >
+        <span>How to play · {info.title}</span>
+        <ChevronDown
+          size={14}
+          className="transition-transform duration-200 flex-shrink-0"
+          style={{ transform: open ? "rotate(180deg)" : "rotate(0deg)" }}
+        />
+      </button>
+      {open && (
+        <ol className="mt-2 flex flex-col gap-1.5 px-3 py-2.5 rounded-lg border border-border bg-muted/20 text-sm text-muted-foreground list-none">
+          {info.steps.map((step, i) => (
+            <li key={i} className="flex gap-2">
+              <span className="text-xs font-mono text-muted-foreground/60 mt-0.5 flex-shrink-0">{i + 1}.</span>
+              <span>{step}</span>
+            </li>
+          ))}
+        </ol>
+      )}
     </div>
   );
 }
@@ -200,6 +253,11 @@ export function WaitingRoomView() {
           <p className="text-4xl font-mono font-bold tracking-[0.2em] text-foreground">
             {mp.roomCode}
           </p>
+          <QRCodeSVG
+            value={`${window.location.origin}/?room=${mp.roomCode}`}
+            size={140}
+            className="rounded-lg"
+          />
           <div className="grid grid-cols-2 gap-2 w-full">
             <Button variant="outline" size="sm" onClick={() => handleCopy("code")}>
               {copied === "code" ? "Copied!" : "Copy Code"}
@@ -255,6 +313,11 @@ export function WaitingRoomView() {
           )}
         </motion.div>
 
+        {/* How to play — updates based on selected mode */}
+        <motion.div variants={item}>
+          <HowToPlayCollapsible mode={gameMode ?? "classic"} />
+        </motion.div>
+
         {/* Color Palette — Colorform only */}
         {gameMode === "colorform" && (
           <motion.div variants={item} className="flex flex-col gap-2">
@@ -296,42 +359,42 @@ export function WaitingRoomView() {
           </motion.div>
         )}
 
-        {/* Rounds */}
-        <motion.div variants={item} className="flex items-center gap-3">
-          <Label className="text-sm text-muted-foreground whitespace-nowrap flex-1">Rounds</Label>
-          <Select
-            value={String(totalRounds ?? 3)}
-            onValueChange={(v) => setRounds(Number(v))}
-            disabled={!mp.isHost}
-          >
-            <SelectTrigger className="w-24">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {ROUND_OPTIONS.map((n) => (
-                <SelectItem key={n} value={String(n)}>{n}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </motion.div>
-
-        {/* Clue timer */}
-        <motion.div variants={item} className="flex items-center gap-3">
-          <Label className="text-sm text-muted-foreground whitespace-nowrap flex-1">Clue Timer</Label>
-          <Select
-            value={String(clueTimerDuration ?? 90)}
-            onValueChange={(v) => setClueTimer(Number(v))}
-            disabled={!mp.isHost}
-          >
-            <SelectTrigger className="w-24">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              {TIMER_OPTIONS.map(({ value, label }) => (
-                <SelectItem key={value} value={String(value)}>{label}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
+        {/* Rounds + Clue Timer */}
+        <motion.div variants={item} className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Rounds</Label>
+            <Select
+              value={String(totalRounds ?? 3)}
+              onValueChange={(v) => setRounds(Number(v))}
+              disabled={!mp.isHost}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {ROUND_OPTIONS.map((n) => (
+                  <SelectItem key={n} value={String(n)}>{n}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Clue Timer</Label>
+            <Select
+              value={String(clueTimerDuration ?? 90)}
+              onValueChange={(v) => setClueTimer(Number(v))}
+              disabled={!mp.isHost}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIMER_OPTIONS.map(({ value, label }) => (
+                  <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </motion.div>
 
         {/* Card categories — not applicable in Colorform mode */}

@@ -74,7 +74,7 @@ function WaveMesh({ isDark }: { isDark: boolean }) {
       <color attach="background" args={[isDark ? "#1e3a8a" : "#2563eb"]} />
       <mesh rotation={[-0.55, 0, 0.15]}>
         {/* 80×80 segments give the noise enough resolution to look smooth */}
-        <planeGeometry args={[10, 10, 80, 80]} />
+        <planeGeometry args={[28, 28, 80, 80]} />
         <shaderMaterial
           ref={matRef}
           vertexShader={vertexShader}

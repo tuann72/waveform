@@ -23,6 +23,7 @@ function useResolvedTheme(): "light" | "dark" {
   return systemDark ? "dark" : "light";
 }
 
+
 export function StartView() {
   const { goTo } = useGame();
   const { setTheme } = useTheme();
@@ -33,7 +34,7 @@ export function StartView() {
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center gap-8 px-4 overflow-hidden">
-      {/* Lava lamp WebGL background */}
+      {/* Wave WebGL background */}
       <WaveBackground isDark={resolved === "dark"} />
 
       {/* Theme toggle */}
@@ -58,6 +59,7 @@ export function StartView() {
       >
         Play
       </Button>
+
     </div>
   );
 }
