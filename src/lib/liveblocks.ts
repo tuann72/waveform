@@ -52,6 +52,7 @@ export type Storage = {
   currentGuessIndex: number;
   guessResults: LiveMap<string, GuessResult>;
   // Colorform-specific fields
+  colorPaletteName: "base" | "deuteranomaly";
   playerColors: LiveMap<string, number[]>;    // playerId → chosen palette index per round
   colorOptions: LiveMap<string, number[][]>;  // playerId → [[opt,opt,opt], ...] per round
 };

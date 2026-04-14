@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react"
+import { ChevronDown, ChevronRight } from "lucide-react"
 import { useGame } from "@/context/GameContext"
 import { useMultiplayer } from "@/context/MultiplayerContext"
 import { useStorage, useMutation, clearGameData } from "@/lib/liveblocks"
@@ -8,13 +9,16 @@ import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Ellipsis } from "@/components/ui/ellipsis"
-import { COLOR_PALETTE } from "@/lib/colorPalette"
+import { getPalette } from "@/lib/colorPalette"
+import type { PaletteName } from "@/lib/colorPalette"
 
 export function ColorformResultsView() {
   const { goTo } = useGame()
   const { mp } = useMultiplayer()
   const { leaving, handleLeave } = useLeaveRoom()
   const [breakdownView, setBreakdownView] = useState<"round" | "player">("round")
+  const [closedRounds, setClosedRounds] = useState(new Set<number>())
+  const [closedPlayers, setClosedPlayers] = useState(new Set<string>())
 
   const players = useStorage((s) => (s ? Object.entries(s.players) : [])) ?? []
   const queue = useStorage((s) => (s ? [...s.guessingQueue] : [])) ?? []
@@ -30,6 +34,8 @@ export function ColorformResultsView() {
     s ? (s.playerClues as Record<string, string[]>) : ({} as Record<string, string[]>),
   ) ?? {}
   const phase = useStorage((s) => s?.phase)
+  const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName
+  const palette = getPalette(colorPaletteName)
 
   // Non-hosts follow host back to lobby
   useEffect(() => {
@@ -43,6 +49,22 @@ export function ColorformResultsView() {
   function handlePlayAgain() {
     resetForNewGame()
     goTo("waitingRoom")
+  }
+
+  function toggleRound(dialIndex: number) {
+    setClosedRounds((prev) => {
+      const next = new Set(prev)
+      next.has(dialIndex) ? next.delete(dialIndex) : next.add(dialIndex)
+      return next
+    })
+  }
+
+  function togglePlayer(playerId: string) {
+    setClosedPlayers((prev) => {
+      const next = new Set(prev)
+      next.has(playerId) ? next.delete(playerId) : next.add(playerId)
+      return next
+    })
   }
 
   // Compute total scores per player
@@ -67,6 +89,15 @@ export function ColorformResultsView() {
     }
     return acc
   }, [])
+
+  // Group entries by round (dialIndex) for "By Round" view
+  const roundGroups = breakdownEntries.reduce<Map<number, { authorId: string }[]>>((map, e) => {
+    const arr = map.get(e.dialIndex) ?? []
+    arr.push({ authorId: e.authorId })
+    map.set(e.dialIndex, arr)
+    return map
+  }, new Map())
+  const sortedRounds = [...roundGroups.keys()].sort((a, b) => a - b)
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4 py-8 pb-24">
@@ -132,81 +163,103 @@ export function ColorformResultsView() {
             </div>
           </div>
 
+          {/* By Round — one collapsible card per round */}
           {breakdownView === "round" &&
-            breakdownEntries.map(({ dialIndex, authorId }) => {
-              const targetIndex = playerColors[authorId]?.[dialIndex]
-              const authorInfo = players.find(([id]) => id === authorId)?.[1]
-              const clue = playerClues[authorId]?.[dialIndex] ?? ""
-              const guessers = players.filter(([id]) => id !== authorId)
+            sortedRounds.map((dialIndex) => {
+              const entries = roundGroups.get(dialIndex) ?? []
+              const isOpen = !closedRounds.has(dialIndex)
 
               return (
-                <div
-                  key={`${dialIndex}-${authorId}`}
-                  className="rounded-xl border p-4 flex flex-col gap-3"
-                >
-                  {/* Author + clue */}
-                  <div className="flex items-center justify-between">
-                    <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                      {authorInfo && (
-                        <span
-                          className="w-1.5 h-1.5 rounded-full"
-                          style={{ background: authorInfo.color }}
-                        />
-                      )}
-                      <span>by {authorInfo?.name ?? "?"}</span>
-                    </div>
-                    <p className="text-sm font-medium">"{clue}"</p>
-                  </div>
+                <div key={dialIndex} className="rounded-xl border overflow-hidden">
+                  {/* Card header */}
+                  <button
+                    onClick={() => toggleRound(dialIndex)}
+                    className="w-full flex items-center justify-between px-4 py-3 text-sm font-medium hover:bg-muted/40 transition-colors cursor-pointer"
+                  >
+                    <span>Round {dialIndex + 1}</span>
+                    {isOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+                  </button>
 
-                  {/* Target swatch */}
-                  {targetIndex !== undefined && (
-                    <div className="flex items-center gap-2">
-                      <div
-                        className="w-8 h-8 rounded-lg flex-shrink-0 border-2 border-border shadow-sm"
-                        style={{ background: COLOR_PALETTE[targetIndex] }}
-                      />
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {COLOR_PALETTE[targetIndex]}
-                      </span>
-                      <span className="text-xs text-muted-foreground ml-1">← target</span>
+                  {/* Card body */}
+                  {isOpen && (
+                    <div className="flex flex-col divide-y border-t">
+                      {entries.map(({ authorId }) => {
+                        const targetIndex = playerColors[authorId]?.[dialIndex]
+                        const authorInfo = players.find(([id]) => id === authorId)?.[1]
+                        const clue = playerClues[authorId]?.[dialIndex] ?? ""
+                        const guessers = players.filter(([id]) => id !== authorId)
+
+                        return (
+                          <div key={authorId} className="p-4 flex flex-col gap-3">
+                            {/* Author + clue */}
+                            <div className="flex items-center justify-between">
+                              <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
+                                {authorInfo && (
+                                  <span
+                                    className="w-1.5 h-1.5 rounded-full"
+                                    style={{ background: authorInfo.color }}
+                                  />
+                                )}
+                                <span>by {authorInfo?.name ?? "?"}</span>
+                              </div>
+                              <p className="text-sm font-medium">"{clue}"</p>
+                            </div>
+
+                            {/* Target swatch */}
+                            {targetIndex !== undefined && (
+                              <div className="flex items-center gap-2">
+                                <div
+                                  className="w-8 h-8 rounded-lg flex-shrink-0 border-2 border-border shadow-sm"
+                                  style={{ background: palette[targetIndex] }}
+                                />
+                                <span className="text-xs text-muted-foreground font-mono">
+                                  {palette[targetIndex]}
+                                </span>
+                                <span className="text-xs text-muted-foreground ml-1">← target</span>
+                              </div>
+                            )}
+
+                            {/* Guessers */}
+                            <div className="flex flex-col gap-1.5">
+                              {guessers.map(([gid, ginfo]) => {
+                                const res = guessResults[`${gid}-${dialIndex}-${authorId}`]
+                                return (
+                                  <div key={gid} className="flex items-center gap-2 text-xs">
+                                    <span
+                                      className="w-1.5 h-1.5 rounded-full flex-shrink-0"
+                                      style={{ background: ginfo.color }}
+                                    />
+                                    <span className="text-muted-foreground w-20 truncate">{ginfo.name}</span>
+                                    {res !== undefined ? (
+                                      <>
+                                        <div
+                                          className="w-5 h-5 rounded flex-shrink-0 border border-border/50"
+                                          style={{ background: palette[res.position] }}
+                                        />
+                                        <span className="font-mono text-muted-foreground text-[10px]">
+                                          {palette[res.position]}
+                                        </span>
+                                        <span className="ml-auto font-semibold text-foreground">
+                                          +{res.points}
+                                        </span>
+                                      </>
+                                    ) : (
+                                      <span className="ml-auto text-muted-foreground">—</span>
+                                    )}
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          </div>
+                        )
+                      })}
                     </div>
                   )}
-
-                  {/* Guessers */}
-                  <div className="flex flex-col gap-1.5">
-                    {guessers.map(([gid, ginfo]) => {
-                      const res = guessResults[`${gid}-${dialIndex}-${authorId}`]
-                      return (
-                        <div key={gid} className="flex items-center gap-2 text-xs">
-                          <span
-                            className="w-1.5 h-1.5 rounded-full flex-shrink-0"
-                            style={{ background: ginfo.color }}
-                          />
-                          <span className="text-muted-foreground w-20 truncate">{ginfo.name}</span>
-                          {res !== undefined ? (
-                            <>
-                              <div
-                                className="w-5 h-5 rounded flex-shrink-0 border border-border/50"
-                                style={{ background: COLOR_PALETTE[res.position] }}
-                              />
-                              <span className="font-mono text-muted-foreground text-[10px]">
-                                {COLOR_PALETTE[res.position]}
-                              </span>
-                              <span className="ml-auto font-semibold text-foreground">
-                                +{res.points}
-                              </span>
-                            </>
-                          ) : (
-                            <span className="ml-auto text-muted-foreground">—</span>
-                          )}
-                        </div>
-                      )
-                    })}
-                  </div>
                 </div>
               )
             })}
 
+          {/* By Player — one collapsible card per player */}
           {breakdownView === "player" &&
             ranked.map(([playerId, playerInfo]) => {
               const myGuesses = breakdownEntries
@@ -229,12 +282,15 @@ export function ColorformResultsView() {
                   clue: string
                 }[]
 
+              const isOpen = !closedPlayers.has(playerId)
+
               return (
-                <div
-                  key={playerId}
-                  className="rounded-xl border p-4 flex flex-col gap-3"
-                >
-                  <div className="flex items-center justify-between">
+                <div key={playerId} className="rounded-xl border overflow-hidden">
+                  {/* Card header */}
+                  <button
+                    onClick={() => togglePlayer(playerId)}
+                    className="w-full flex items-center justify-between px-4 py-3 hover:bg-muted/40 transition-colors cursor-pointer"
+                  >
                     <div className="flex items-center gap-2">
                       <span
                         className="w-2 h-2 rounded-full"
@@ -245,49 +301,57 @@ export function ColorformResultsView() {
                         {playerId === mp.playerId ? " (you)" : ""}
                       </span>
                     </div>
-                    <span className="text-sm font-bold">{scoreMap[playerId] ?? 0} pts</span>
-                  </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm font-bold">{scoreMap[playerId] ?? 0} pts</span>
+                      {isOpen ? <ChevronDown size={15} className="text-muted-foreground" /> : <ChevronRight size={15} className="text-muted-foreground" />}
+                    </div>
+                  </button>
 
-                  {myGuesses.map(({ dialIndex, authorId, result, targetIndex, authorInfo, clue }) => (
-                    <div
-                      key={`${dialIndex}-${authorId}`}
-                      className="flex flex-col gap-1.5 pl-4 border-l-2"
-                      style={{ borderColor: playerInfo.color + "60" }}
-                    >
-                      <div className="flex items-center gap-1 text-xs text-muted-foreground">
-                        {authorInfo && (
-                          <span
-                            className="w-1.5 h-1.5 rounded-full"
-                            style={{ background: authorInfo.color }}
-                          />
-                        )}
-                        <span>
-                          {authorInfo?.name ?? "?"}'s clue: "{clue}"
-                        </span>
-                        <span className="ml-auto font-semibold text-foreground">
-                          +{result.points} pt{result.points !== 1 ? "s" : ""}
-                        </span>
-                      </div>
-                      {targetIndex !== undefined && (
-                        <div className="flex items-center gap-2">
-                          <div
-                            className="w-5 h-5 rounded border border-border/50 flex-shrink-0"
-                            style={{ background: COLOR_PALETTE[result.position] }}
-                            title="Your guess"
-                          />
-                          <span className="text-xs text-muted-foreground">→</span>
-                          <div
-                            className="w-5 h-5 rounded border-2 border-white shadow flex-shrink-0"
-                            style={{ background: COLOR_PALETTE[targetIndex] }}
-                            title="Target"
-                          />
+                  {/* Card body */}
+                  {isOpen && (
+                    <div className="flex flex-col gap-3 p-4 border-t">
+                      {myGuesses.map(({ dialIndex, authorId, result, targetIndex, authorInfo, clue }) => (
+                        <div
+                          key={`${dialIndex}-${authorId}`}
+                          className="flex flex-col gap-1.5 pl-4 border-l-2"
+                          style={{ borderColor: playerInfo.color + "60" }}
+                        >
+                          <div className="flex items-center gap-1 text-xs text-muted-foreground">
+                            {authorInfo && (
+                              <span
+                                className="w-1.5 h-1.5 rounded-full"
+                                style={{ background: authorInfo.color }}
+                              />
+                            )}
+                            <span>
+                              {authorInfo?.name ?? "?"}'s clue: "{clue}"
+                            </span>
+                            <span className="ml-auto font-semibold text-foreground">
+                              +{result.points} pt{result.points !== 1 ? "s" : ""}
+                            </span>
+                          </div>
+                          {targetIndex !== undefined && (
+                            <div className="flex items-center gap-2">
+                              <div
+                                className="w-5 h-5 rounded border border-border/50 flex-shrink-0"
+                                style={{ background: palette[result.position] }}
+                                title="Your guess"
+                              />
+                              <span className="text-xs text-muted-foreground">→</span>
+                              <div
+                                className="w-5 h-5 rounded border-2 border-white shadow flex-shrink-0"
+                                style={{ background: palette[targetIndex] }}
+                                title="Target"
+                              />
+                            </div>
+                          )}
                         </div>
+                      ))}
+
+                      {myGuesses.length === 0 && (
+                        <p className="text-xs text-muted-foreground">No guesses recorded</p>
                       )}
                     </div>
-                  ))}
-
-                  {myGuesses.length === 0 && (
-                    <p className="text-xs text-muted-foreground pl-4">No guesses recorded</p>
                   )}
                 </div>
               )

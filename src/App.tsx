@@ -41,7 +41,11 @@ function RoomOrchestrator() {
     }
   }, [hostId, mp.isHost, mp.playerId]);
 
-  // Detect host disconnection via presence and promote the first connected player
+  // Detect host disconnection via presence and promote the first connected player.
+  // Debounced: promotion is delayed 3s so initial presence sync (which starts empty)
+  // doesn't falsely trigger promotion when a new player first joins.
+  // If the host's presence arrives before the timer fires the effect re-runs,
+  // hits the early return, and the cleanup cancels the pending timer.
   useEffect(() => {
     if (!hostId || !players.length || mp.isHost) return;
 
@@ -61,8 +65,8 @@ function RoomOrchestrator() {
     const [firstId] = connectedPlayers[0];
     if (firstId !== mp.playerId) return; // someone else will handle it
 
-    promoteToHost(hostId, mp.playerId);
-    // Local state update happens via the hostId effect above once storage updates
+    const timer = setTimeout(() => promoteToHost(hostId, mp.playerId), 3000);
+    return () => clearTimeout(timer);
   }, [others, hostId, players, mp.isHost, mp.playerId]);
 
   return null;
@@ -127,6 +131,7 @@ function MultiplayerRoom() {
         guessingQueue: new LiveList([]),
         currentGuessIndex: 0,
         guessResults: new LiveMap(),
+        colorPaletteName: "base",
         playerColors: new LiveMap(),
         colorOptions: new LiveMap(),
       }}

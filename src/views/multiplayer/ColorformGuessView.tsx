@@ -6,7 +6,8 @@ import { ColorGrid } from "@/components/game/ColorGrid"
 import { EmojiReactions } from "@/components/game/EmojiReactions"
 import { Button } from "@/components/ui/button"
 import { Ellipsis } from "@/components/ui/ellipsis"
-import { calcColorPoints, COLOR_PALETTE } from "@/lib/colorPalette"
+import { calcColorPoints, getPalette } from "@/lib/colorPalette"
+import type { PaletteName } from "@/lib/colorPalette"
 
 export function ColorformGuessView() {
   const { goTo } = useGame()
@@ -27,6 +28,8 @@ export function ColorformGuessView() {
       : ({} as Record<string, { position: number; points: number }>),
   ) ?? {}
   const phase = useStorage((s) => s?.phase)
+  const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName
+  const palette = getPalette(colorPaletteName)
 
   const [selectedColorIndex, setSelectedColorIndex] = useState<number | null>(null)
   const [resetFor, setResetFor] = useState<number | null>(null)
@@ -190,6 +193,7 @@ export function ColorformGuessView() {
           scoreRadiusCenter={scoreRadiusCenter}
           guessMarkers={guessMarkers}
           disabled={!amIGuesser || amILocked || amIAuthor}
+          palette={palette}
         />
       </div>
 
@@ -202,7 +206,7 @@ export function ColorformGuessView() {
               style={{
                 background:
                   selectedColorIndex !== null
-                    ? COLOR_PALETTE[selectedColorIndex]
+                    ? palette[selectedColorIndex]
                     : "hsl(var(--muted))",
               }}
             />
@@ -220,7 +224,7 @@ export function ColorformGuessView() {
           <div className="flex items-center gap-3">
             <div
               className="w-10 h-10 rounded-lg flex-shrink-0 border-2 border-border"
-              style={{ background: COLOR_PALETTE[myResult!.position] }}
+              style={{ background: palette[myResult!.position] }}
             />
             <div className="flex-1">
               {allGuessersLocked ? (
@@ -255,7 +259,7 @@ export function ColorformGuessView() {
                   {result !== undefined && (
                     <div
                       className="ml-1 w-4 h-4 rounded flex-shrink-0 border border-border/50"
-                      style={{ background: COLOR_PALETTE[result.position] }}
+                      style={{ background: palette[result.position] }}
                     />
                   )}
                   <span className="ml-auto">
@@ -281,11 +285,11 @@ export function ColorformGuessView() {
           <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border">
             <div
               className="w-10 h-10 rounded-lg flex-shrink-0 border-2 border-white shadow"
-              style={{ background: COLOR_PALETTE[authorTarget] }}
+              style={{ background: palette[authorTarget] }}
             />
             <div>
               <p className="text-xs text-muted-foreground">Target color</p>
-              <p className="text-sm font-mono">{COLOR_PALETTE[authorTarget]}</p>
+              <p className="text-sm font-mono">{palette[authorTarget]}</p>
             </div>
           </div>
         )}

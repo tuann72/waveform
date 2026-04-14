@@ -13,6 +13,26 @@ import { Label } from "@/components/ui/label";
 import { ROUND_OPTIONS } from "@/types/game";
 import { CARD_CATEGORIES } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
+import { COLOR_PALETTE, COLOR_PALETTE_DEUTERANOMALY, PALETTE_COLS } from "@/lib/colorPalette";
+import type { PaletteName } from "@/lib/colorPalette";
+
+function MiniPalettePreview({ palette }: { palette: readonly string[] }) {
+  return (
+    <div
+      className="rounded overflow-hidden"
+      style={{
+        display: "grid",
+        gridTemplateColumns: `repeat(${PALETTE_COLS}, 1fr)`,
+        gap: "1px",
+        background: "#000",
+      }}
+    >
+      {palette.map((color, i) => (
+        <div key={i} style={{ background: color, aspectRatio: "1" }} />
+      ))}
+    </div>
+  );
+}
 
 const MAX_PLAYERS = 12;
 const COPY_FEEDBACK_MS = 2000;
@@ -47,6 +67,7 @@ export function WaitingRoomView() {
   const gameMode = useStorage((s) => s?.gameMode ?? "classic");
   const clueTimerDuration = useStorage((s) => s?.clueTimerDuration ?? 90);
   const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
+  const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName;
 
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [noHostFound, setNoHostFound] = useState(false);
@@ -128,6 +149,10 @@ export function WaitingRoomView() {
 
   const setSelectedCategories = useMutation(({ storage }, cats: string[]) => {
     storage.set("selectedCategories", cats);
+  }, []);
+
+  const setColorPalette = useMutation(({ storage }, name: PaletteName) => {
+    storage.set("colorPaletteName", name);
   }, []);
 
   const kickPlayer = useMutation(({ storage }, kickId: string) => {
@@ -229,6 +254,47 @@ export function WaitingRoomView() {
             <p className="text-xs text-muted-foreground text-center">Only the host can change settings</p>
           )}
         </motion.div>
+
+        {/* Color Palette — Colorform only */}
+        {gameMode === "colorform" && (
+          <motion.div variants={item} className="flex flex-col gap-2">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Color Palette</p>
+            <div className="flex items-center gap-2">
+              {/* Base palette button */}
+              <div className="relative group">
+                <button
+                  onClick={() => mp.isHost && setColorPalette("base")}
+                  className={`rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors ${mp.isHost ? "cursor-pointer" : "cursor-default"} ${
+                    colorPaletteName === "base"
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  Base
+                </button>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded-lg border bg-background shadow-xl p-1.5 hidden group-hover:block">
+                  <MiniPalettePreview palette={COLOR_PALETTE} />
+                </div>
+              </div>
+              {/* Colorblind palette button */}
+              <div className="relative group">
+                <button
+                  onClick={() => mp.isHost && setColorPalette("deuteranomaly")}
+                  className={`rounded-lg border-2 px-3 py-2 text-sm font-medium transition-colors ${mp.isHost ? "cursor-pointer" : "cursor-default"} ${
+                    colorPaletteName === "deuteranomaly"
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  Deuteranomaly
+                </button>
+                <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 z-50 w-56 rounded-lg border bg-background shadow-xl p-1.5 hidden group-hover:block">
+                  <MiniPalettePreview palette={COLOR_PALETTE_DEUTERANOMALY} />
+                </div>
+              </div>
+            </div>
+          </motion.div>
+        )}
 
         {/* Rounds */}
         <motion.div variants={item} className="flex items-center gap-3">

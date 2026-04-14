@@ -1,47 +1,74 @@
-import { useEffect, useRef, useState } from "react";
+import { startTransition, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { AnimatePresence, motion } from "motion/react";
-import { useOthers, useUpdateMyPresence } from "@/lib/liveblocks";
+import { useOthers, useUpdateMyPresence, useStorage } from "@/lib/liveblocks";
+import { useMultiplayer } from "@/context/MultiplayerContext";
 
 const HAMSTERS = Array.from({ length: 12 }, (_, i) => `/hamsters/hamster${i + 1}.jpg`);
 
 interface Floater {
   id: string;
   src: string;
-  x: number; // % from left
+  x: number;
+  borderColor?: string;
 }
 
 export function EmojiReactions() {
   const updateMyPresence = useUpdateMyPresence();
   const others = useOthers();
+  const { mp } = useMultiplayer();
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const seenRef = useRef<Record<string, string>>({});
+  const isFirstRunRef = useRef(true);
 
-  function spawnFloater(src: string, key: string) {
-    const x = 5 + Math.random() * 80;
-    setFloaters((prev) => [...prev, { id: key, src, x }]);
-  }
+  const playersRaw = useStorage((s) => (s ? Object.entries(s.players) : null));
+  const colorMap = useMemo(
+    () => new Map((playersRaw ?? []).map(([id, info]) => [id, info.color])),
+    [playersRaw],
+  );
 
-  function removeFloater(id: string) {
+  const removeFloater = useCallback((id: string) => {
     setFloaters((prev) => prev.filter((f) => f.id !== id));
-  }
+  }, []);
 
-  function handleReact(src: string) {
+  // Local reaction: spawn floater immediately and broadcast via presence
+  const handleReact = useCallback((src: string) => {
     const id = Math.random().toString(36).slice(2);
     updateMyPresence({ reaction: { emoji: src, id } });
-    spawnFloater(src, `local-${id}`);
-  }
+    const x = 5 + Math.random() * 80;
+    setFloaters((prev) => [
+      ...prev,
+      { id: `local-${id}`, src, x, borderColor: colorMap.get(mp.playerId) },
+    ]);
+  }, [updateMyPresence, colorMap, mp.playerId]);
 
-  // Spawn floaters for incoming reactions from other players
+  // Spawn floaters for incoming reactions from other players.
+  // First run: mark all existing reactions as seen without spawning —
+  // they're stale presence carried over from before this view mounted.
   useEffect(() => {
+    const incoming: Floater[] = []
+
     for (const other of others) {
       const reaction = other.presence?.reaction;
       const pid = other.presence?.playerId;
       if (!reaction || !pid) continue;
       if (seenRef.current[pid] === reaction.id) continue;
       seenRef.current[pid] = reaction.id;
-      spawnFloater(reaction.emoji, `${pid}-${reaction.id}`);
+      if (isFirstRunRef.current) continue;
+      incoming.push({
+        id: `${pid}-${reaction.id}`,
+        src: reaction.emoji,
+        x: 5 + Math.random() * 80,
+        borderColor: colorMap.get(pid),
+      })
     }
-  }, [others]);
+    isFirstRunRef.current = false;
+
+    if (incoming.length > 0) {
+      startTransition(() => {
+        setFloaters((prev) => [...prev, ...incoming])
+      })
+    }
+  }, [others, colorMap]);
 
   return (
     <>
@@ -59,7 +86,12 @@ export function EmojiReactions() {
             }}
             onAnimationComplete={() => removeFloater(f.id)}
             className="fixed w-12 h-12 rounded-full object-cover pointer-events-none z-50 select-none"
-            style={{ left: `${f.x}%`, bottom: "68px" }}
+            style={{
+              left: `${f.x}%`,
+              bottom: "68px",
+              outline: f.borderColor ? `3px solid ${f.borderColor}` : undefined,
+              outlineOffset: "2px",
+            }}
           />
         ))}
       </AnimatePresence>
