@@ -59,6 +59,7 @@ export function MultiClueView() {
   const [currentDial, setCurrentDial] = useState(0);
   const [cluesInitializedFor, setCluesInitializedFor] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [hasRerolled, setHasRerolled] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const savedOnExpiryRef = useRef(false);
 
@@ -132,6 +133,36 @@ export function MultiClueView() {
     [],
   );
 
+  const rerollDial = useMutation(
+    ({ storage }, playerId: string, dialIndex: number, categories: string[]) => {
+      const pd = storage.get("playerDials");
+      const currentDials = pd.get(playerId) ?? [];
+      const usedIds = new Set(currentDials.map((d) => d.id));
+      const base = categories.length > 0
+        ? spectrumCards.filter((c) => c.category && categories.includes(c.category))
+        : spectrumCards;
+      const available = base.filter((c) => !usedIds.has(c.id));
+      const pool = available.length > 0 ? available : base;
+      const picked = pool[Math.floor(Math.random() * pool.length)];
+      const newDials = [...currentDials];
+      newDials[dialIndex] = {
+        id: picked.id,
+        left: picked.left,
+        right: picked.right,
+        targetPosition: Math.random() * 96 + 2,
+      };
+      pd.set(playerId, newDials);
+    },
+    [],
+  );
+
+  const clearMyClues = useMutation(
+    ({ storage }, playerId: string) => {
+      storage.get("playerClues").delete(playerId);
+    },
+    [],
+  );
+
   // Generate and store this player's random dials once
   useEffect(() => {
     if (!playerDials[mp.playerId]) {
@@ -161,11 +192,33 @@ export function MultiClueView() {
     return () => clearTimeout(timer);
   }, [timerExpired, mp.isHost, players, others]);
 
+  const allOthersSubmitted = players
+    .filter(([id]) => id !== mp.playerId)
+    .every(([id]) => {
+      const saved = playerClues[id] ?? [];
+      const dialCount = playerDials[id]?.length ?? 0;
+      return dialCount > 0 && saved.length >= dialCount && saved.every((c) => c.trim());
+    });
+
   function handleSubmitAll() {
     if (clues.some((c) => !c.trim())) return;
     setHasSubmitted(true);
     saveClues(mp.playerId, clues);
     updatePresence({ cluesComplete: true });
+  }
+
+  function handleReroll() {
+    const next = [...clues];
+    next[currentDial] = "";
+    setClues(next);
+    setHasRerolled(true);
+    rerollDial(mp.playerId, currentDial, selectedCategories);
+  }
+
+  function handleUnlock() {
+    setHasSubmitted(false);
+    clearMyClues(mp.playerId);
+    updatePresence({ cluesComplete: false });
   }
 
   // Host advances when every player has fully submitted (no-timer or before timer fires)
@@ -265,6 +318,21 @@ export function MultiClueView() {
           disabled={true}
         />
 
+        {/* Reroll button */}
+        {!myCluesSubmitted && (
+          <div className="flex justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={hasRerolled}
+              onClick={handleReroll}
+              className="text-xs"
+            >
+              {hasRerolled ? "Rerolled" : "Reroll Card"}
+            </Button>
+          </div>
+        )}
+
         {/* Clue input */}
         {!myCluesSubmitted ? (
           <div className="flex flex-col gap-2">
@@ -314,10 +382,17 @@ export function MultiClueView() {
             </div>
           </div>
         ) : (
-          <div className="text-center text-sm text-muted-foreground py-2">
-            {timerExpired && !hasSubmitted
-              ? "Time's up! Your clues have been saved."
-              : <>Clues submitted! Waiting for others<Ellipsis /></>}
+          <div className="flex flex-col items-center gap-3 py-2">
+            <p className="text-center text-sm text-muted-foreground">
+              {timerExpired && !hasSubmitted
+                ? "Time's up! Your clues have been saved."
+                : <>Clues submitted! Waiting for others<Ellipsis /></>}
+            </p>
+            {hasSubmitted && !timerExpired && !allOthersSubmitted && (
+              <Button variant="outline" size="sm" onClick={handleUnlock}>
+                Edit Clues
+              </Button>
+            )}
           </div>
         )}
 

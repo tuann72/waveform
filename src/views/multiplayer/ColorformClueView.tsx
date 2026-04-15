@@ -62,6 +62,7 @@ export function ColorformClueView() {
   );
   const [currentRound, setCurrentRound] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
+  const [hasRerolled, setHasRerolled] = useState(false);
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const savedOnExpiryRef = useRef(false);
 
@@ -110,6 +111,25 @@ export function ColorformClueView() {
     ({ storage }, playerId: string, colors: number[], clueArr: string[]) => {
       storage.get("playerColors").set(playerId, colors);
       storage.get("playerClues").set(playerId, clueArr);
+    },
+    [],
+  );
+
+  const rerollColorOpts = useMutation(
+    ({ storage }, playerId: string, roundIndex: number) => {
+      const co = storage.get("colorOptions");
+      const current = co.get(playerId) ?? [];
+      const updated = [...current];
+      updated[roundIndex] = pickColorOptions();
+      co.set(playerId, updated);
+    },
+    [],
+  );
+
+  const clearColorformData = useMutation(
+    ({ storage }, playerId: string) => {
+      storage.get("playerColors").delete(playerId);
+      storage.get("playerClues").delete(playerId);
     },
     [],
   );
@@ -181,6 +201,30 @@ export function ColorformClueView() {
     });
     if (allReady) advanceToGuessingColor(allPlayerIds);
   }, [playerClues, playerColors, players]);
+
+  const allOthersSubmitted = players
+    .filter(([id]) => id !== mp.playerId)
+    .every(([id]) => {
+      const saved = playerClues[id] ?? [];
+      return saved.length >= totalRounds && saved.every((c) => c.trim());
+    });
+
+  function handleReroll() {
+    const nextColors = [...selectedColors];
+    nextColors[currentRound] = null;
+    setSelectedColors(nextColors);
+    const nextClues = [...clues];
+    nextClues[currentRound] = "";
+    setClues(nextClues);
+    setHasRerolled(true);
+    rerollColorOpts(mp.playerId, currentRound);
+  }
+
+  function handleUnlock() {
+    setHasSubmitted(false);
+    clearColorformData(mp.playerId);
+    updatePresence({ cluesComplete: false });
+  }
 
   function handleSelectColor(colorIdx: number) {
     const next = [...selectedColors];
@@ -322,6 +366,19 @@ export function ColorformClueView() {
               </div>
             </div>
 
+            {/* Reroll button */}
+            <div className="flex justify-end">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={hasRerolled}
+                onClick={handleReroll}
+                className="text-xs"
+              >
+                {hasRerolled ? "Rerolled" : "Reroll Colors"}
+              </Button>
+            </div>
+
             {/* Selected color preview */}
             {currentSelectedIndex !== null ? (
               <div className="flex items-center gap-3 p-3 rounded-xl bg-muted/40 border">
@@ -400,14 +457,21 @@ export function ColorformClueView() {
             </div>
           </>
         ) : (
-          <div className="text-center text-sm text-muted-foreground py-2">
-            {timerExpired && !hasSubmitted ? (
-              "Time's up! Your clues have been saved."
-            ) : (
-              <>
-                Clues submitted! Waiting for others
-                <Ellipsis />
-              </>
+          <div className="flex flex-col items-center gap-3 py-2">
+            <p className="text-center text-sm text-muted-foreground">
+              {timerExpired && !hasSubmitted ? (
+                "Time's up! Your clues have been saved."
+              ) : (
+                <>
+                  Clues submitted! Waiting for others
+                  <Ellipsis />
+                </>
+              )}
+            </p>
+            {hasSubmitted && !timerExpired && !allOthersSubmitted && (
+              <Button variant="outline" size="sm" onClick={handleUnlock}>
+                Edit Clues
+              </Button>
             )}
           </div>
         )}
