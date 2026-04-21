@@ -20,7 +20,7 @@ export function MultiGuessView() {
   const playerClues = useStorage((s) => s ? s.playerClues as Record<string, string[]> : {} as Record<string, string[]>) ?? {};
   const queue = useStorage((s) => s ? [...s.guessingQueue] : []) ?? [];
   const currentGuessIndex = useStorage((s) => s?.currentGuessIndex ?? 0) ?? 0;
-  const guessResults = useStorage((s) => s ? s.guessResults as Record<string, { position: number; points: number }> : {} as Record<string, { position: number; points: number }>) ?? {};
+  const guessResults = useStorage((s) => s ? s.guessResults as Record<string, { position: number; points: number; doubleDown?: boolean }> : {} as Record<string, { position: number; points: number; doubleDown?: boolean }>) ?? {};
   const phase = useStorage((s) => s?.phase);
 
   const [dialPosition, setDialPosition] = useState(50);
