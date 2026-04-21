@@ -341,7 +341,7 @@ export function MultiClueView() {
                 key={currentDial}
                 placeholder={`Clue for "${dial.left} ↔ ${dial.right}"`}
                 value={clues[currentDial] ?? ""}
-                maxLength={30}
+                maxLength={50}
                 onChange={(e) => {
                   const next = [...clues];
                   next[currentDial] = e.target.value;
@@ -353,7 +353,7 @@ export function MultiClueView() {
                 autoFocus
               />
               <span className="text-xs text-muted-foreground text-right">
-                {(clues[currentDial] ?? "").length}/30
+                {(clues[currentDial] ?? "").length}/50
               </span>
             </div>
             <div className="flex gap-2">
@@ -365,7 +365,6 @@ export function MultiClueView() {
               {currentDial < myDials.length - 1 ? (
                 <Button
                   className="flex-1"
-                  disabled={!clues[currentDial]?.trim()}
                   onClick={() => setCurrentDial((n) => n + 1)}
                 >
                   Next →

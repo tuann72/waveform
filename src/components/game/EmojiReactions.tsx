@@ -19,6 +19,7 @@ export function EmojiReactions() {
   const [floaters, setFloaters] = useState<Floater[]>([]);
   const seenRef = useRef<Record<string, string>>({});
   const isFirstRunRef = useRef(true);
+  const spamLockedRef = useRef(false);
 
   const playersRaw = useStorage((s) => (s ? Object.entries(s.players) : null));
   const colorMap = useMemo(
@@ -27,18 +28,24 @@ export function EmojiReactions() {
   );
 
   const removeFloater = useCallback((id: string) => {
-    setFloaters((prev) => prev.filter((f) => f.id !== id));
+    setFloaters((prev) => {
+      const next = prev.filter((f) => f.id !== id);
+      if (next.length < 50) spamLockedRef.current = false;
+      return next;
+    });
   }, []);
 
   // Local reaction: spawn floater immediately and broadcast via presence
   const handleReact = useCallback((src: string) => {
+    if (spamLockedRef.current) return;
     const id = Math.random().toString(36).slice(2);
     updateMyPresence({ reaction: { emoji: src, id } });
     const x = 5 + Math.random() * 80;
-    setFloaters((prev) => [
-      ...prev,
-      { id: `local-${id}`, src, x, borderColor: colorMap.get(mp.playerId) },
-    ]);
+    setFloaters((prev) => {
+      const next = [...prev, { id: `local-${id}`, src, x, borderColor: colorMap.get(mp.playerId) }];
+      if (next.length >= 50) spamLockedRef.current = true;
+      return next;
+    });
   }, [updateMyPresence, colorMap, mp.playerId]);
 
   // Spawn floaters for incoming reactions from other players.
@@ -65,7 +72,11 @@ export function EmojiReactions() {
 
     if (incoming.length > 0) {
       startTransition(() => {
-        setFloaters((prev) => [...prev, ...incoming])
+        setFloaters((prev) => {
+          const next = [...prev, ...incoming];
+          if (next.length >= 50) spamLockedRef.current = true;
+          return next;
+        })
       })
     }
   }, [others, colorMap]);

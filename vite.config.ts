@@ -38,7 +38,7 @@ export default defineConfig(({ mode }) => {
               return
             }
 
-            if (!req.url?.startsWith('/api/delete-room') || req.method !== 'DELETE') {
+            if (!req.url?.startsWith('/api/delete-room') || (req.method !== 'DELETE' && req.method !== 'POST')) {
               next()
               return
             }

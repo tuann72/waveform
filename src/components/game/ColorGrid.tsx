@@ -33,7 +33,7 @@ const BORDER_THICK = "2px"
 const GRID_STYLE: React.CSSProperties = {
   display: "grid",
   gridTemplateColumns: `repeat(${PALETTE_COLS}, 1fr)`,
-  gap: "2px",
+  gap: "1px",
   background: "#000",
 }
 

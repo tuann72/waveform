@@ -183,13 +183,22 @@ export function ColorformGuessView() {
           <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Clue</p>
           <p className="text-2xl font-semibold text-foreground">{clue}</p>
         </div>
+
+        {amIAuthor && authorTarget !== undefined && (
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg bg-muted/30 border border-border/50">
+            <div
+              className="w-6 h-6 rounded flex-shrink-0 border border-border"
+              style={{ background: palette[authorTarget] }}
+            />
+            <span className="text-xs text-muted-foreground">Your chosen color</span>
+          </div>
+        )}
       </div>
 
-      <div className="w-full px-2 mt-4">
+      <div className="w-full max-w-[300px] mx-auto px-2 mt-3">
         <ColorGrid
           selectedIndex={displayColorIndex}
           onSelect={amIGuesser && !amILocked ? setSelectedColorIndex : () => {}}
-          targetIndex={allGuessersLocked ? authorTarget : undefined}
           scoreRadiusCenter={scoreRadiusCenter}
           guessMarkers={guessMarkers}
           disabled={!amIGuesser || amILocked || amIAuthor}

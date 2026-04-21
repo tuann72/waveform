@@ -406,22 +406,32 @@ export function ColorformClueView() {
 
             {/* Clue input */}
             <div className="flex flex-col gap-2">
-              <Input
-                key={currentRound}
-                placeholder="Describe this color (Don't mention it explicitly!)"
-                value={clues[currentRound] ?? ""}
-                disabled={currentSelectedIndex === null}
-                onChange={(e) => {
-                  const next = [...clues];
-                  next[currentRound] = e.target.value;
-                  setClues(next);
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && currentRound < totalRounds - 1)
-                    setCurrentRound((n) => n + 1);
-                }}
-                autoFocus
-              />
+              <div className="relative">
+                <Input
+                  key={currentRound}
+                  placeholder="Describe this color (Don't mention it explicitly!)"
+                  value={clues[currentRound] ?? ""}
+                  disabled={currentSelectedIndex === null}
+                  maxLength={50}
+                  onChange={(e) => {
+                    const next = [...clues];
+                    next[currentRound] = e.target.value;
+                    setClues(next);
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" && currentRound < totalRounds - 1)
+                      setCurrentRound((n) => n + 1);
+                  }}
+                  autoFocus
+                />
+                <span className={cn(
+                  "absolute right-2 bottom-1.5 text-xs tabular-nums pointer-events-none",
+                  (clues[currentRound]?.length ?? 0) >= 45 ? "text-amber-500" : "text-muted-foreground/50",
+                  (clues[currentRound]?.length ?? 0) >= 50 && "text-red-500",
+                )}>
+                  {clues[currentRound]?.length ?? 0}/50
+                </span>
+              </div>
 
               <div className="flex gap-2">
                 {currentRound > 0 && (

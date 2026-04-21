@@ -23,19 +23,32 @@ export type GuessEntry = {
 };
 
 export type GuessResult = {
-  position: number;
-  points: number;
+  position: number;   // x for 2D, single position for classic/colorform
+  posY?: number;      // y for 2D only
+  points: number;     // effective points (doubleDown already applied)
+  doubleDown?: boolean;
 };
 
 export type Presence = {
   playerName: string;
   cluesComplete: boolean;
   playerId: string | null;
-  dialPosition: number | null;
+  dialPosition: number | null;   // classic: needle pos; 2D: x pos
+  dialPositionY: number | null;  // 2D only: y pos
   reaction: { emoji: string; id: string } | null;
 };
 
-export type GameMode = "classic" | "3d" | "colorform";
+export type GameMode = "classic" | "3d" | "colorform" | "2d";
+
+export type Dial2DConfig = {
+  id: string;
+  left: string;    // horizontal axis left
+  right: string;   // horizontal axis right
+  bottom: string;  // vertical axis bottom
+  top: string;     // vertical axis top
+  targetX: number; // 0–100
+  targetY: number; // 0–100
+};
 
 export type Storage = {
   phase: RoomPhase;
@@ -55,6 +68,8 @@ export type Storage = {
   colorPaletteName: "base" | "deuteranomaly";
   playerColors: LiveMap<string, number[]>;    // playerId → chosen palette index per round
   colorOptions: LiveMap<string, number[][]>;  // playerId → [[opt,opt,opt], ...] per round
+  // 2D-specific fields
+  player2DDials: LiveMap<string, Dial2DConfig[]>;
 };
 
 // Clears all per-game data from storage. Does NOT touch players, gameMode,
@@ -75,10 +90,13 @@ export function clearGameData(storage: LiveObject<Storage>) {
   for (const k of playerColors.keys()) playerColors.delete(k);
   const colorOptions = storage.get("colorOptions");
   for (const k of colorOptions.keys()) colorOptions.delete(k);
+  const player2DDials = storage.get("player2DDials");
+  for (const k of player2DDials.keys()) player2DDials.delete(k);
 }
 
 const client = createClient({
   publicApiKey: import.meta.env.VITE_LIVEBLOCKS_PUBLIC_KEY,
+  throttle: 16,
 });
 
 export const {

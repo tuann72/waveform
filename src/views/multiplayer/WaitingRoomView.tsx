@@ -43,7 +43,16 @@ const INSTRUCTIONS: Record<string, { title: string; steps: string[] }> = {
       "Each player sees a spectrum dial (e.g. Hot ↔ Cold) with a hidden target zone.",
       "Write a clue that hints at where the target sits on the dial.",
       "Everyone else drags the needle to their best guess.",
-      "Closer guesses score more points — bullseye scores 4.",
+      "Closer guesses score more points — bullseye scores 3.",
+    ],
+  },
+  "2d": {
+    title: "2D",
+    steps: [
+      "Each player sees a 2D plane with two spectrums — one horizontal, one vertical.",
+      "Your target is a hidden point on the plane. Write ONE clue that hints at both axes.",
+      "Everyone else taps where they think the target is — scoring uses circular zones.",
+      "Bullseye = 3 pts · close = 2 pts · near = 1 pt · miss = 0 pts.",
     ],
   },
   colorform: {
@@ -124,6 +133,7 @@ export function WaitingRoomView() {
 
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [noHostFound, setNoHostFound] = useState(false);
+  const [colorPickerOpen, setColorPickerOpen] = useState(false);
   const storageLoaded = useStorage((s) => s !== null);
   const { leaving, handleLeave } = useLeaveRoom();
   // Non-hosts navigate when phase changes lobby → clue.
@@ -215,6 +225,11 @@ export function WaitingRoomView() {
     storage.get("players").delete(kickId);
   }, []);
 
+  const updatePlayerColor = useMutation(({ storage }, id: string, color: string) => {
+    const p = storage.get("players").get(id);
+    if (p) storage.get("players").set(id, { ...p, color });
+  }, []);
+
   function toggleCategory(cat: string) {
     if (!mp.isHost) return;
     const next = selectedCategories.includes(cat)
@@ -276,22 +291,34 @@ export function WaitingRoomView() {
         {/* Game mode selection */}
         <motion.div variants={item} className="flex flex-col gap-3">
           <p className="text-xs uppercase tracking-widest text-muted-foreground">Game Mode</p>
-          <div className="grid grid-cols-3 gap-2">
-            <button
-              onClick={() => mp.isHost && setGameMode("classic")}
-              disabled={!mp.isHost}
-              className={`rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
-                gameMode === "classic"
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-primary/50"
-              }`}
-            >
-              Classic
-            </button>
+          <div className="flex flex-col gap-2">
+            {/* Classic + 2D side by side */}
+            <div className="grid grid-cols-2 gap-2">
+              {(["classic", "2d"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => mp.isHost && setGameMode(mode)}
+                  disabled={!mp.isHost}
+                  className={`rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
+                    gameMode === mode
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {mode === "classic" ? "Classic" : "2D"}
+                </button>
+              ))}
+            </div>
+            {/* Colorform separated */}
+            <div className="flex items-center gap-2">
+              <div className="flex-1 h-px bg-border/60" />
+              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-widest px-1">color</span>
+              <div className="flex-1 h-px bg-border/60" />
+            </div>
             <button
               onClick={() => mp.isHost && setGameMode("colorform")}
               disabled={!mp.isHost}
-              className={`rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
+              className={`w-full rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
                 gameMode === "colorform"
                   ? "border-primary bg-primary/10 text-foreground"
                   : "border-border text-muted-foreground hover:border-primary/50"
@@ -299,17 +326,6 @@ export function WaitingRoomView() {
             >
               Colorform
             </button>
-            <div className="relative">
-              <button
-                disabled
-                className="w-full rounded-lg border-2 border-border px-3 py-3 text-sm font-medium opacity-50 cursor-not-allowed"
-              >
-                3D Mode
-              </button>
-              <Badge variant="secondary" className="absolute -top-2 -right-2 text-xs px-1.5 py-0">
-                Soon
-              </Badge>
-            </div>
           </div>
           {!mp.isHost && (
             <p className="text-xs text-muted-foreground text-center">Only the host can change settings</p>
@@ -453,27 +469,55 @@ export function WaitingRoomView() {
             Players ({playerCount})
           </p>
           {players?.map(([id, info]) => (
-            <div key={id} className="flex items-center justify-between py-1">
-              <div className="flex items-center gap-2">
-                <span
-                  className="w-2.5 h-2.5 rounded-full flex-shrink-0"
-                  style={{ background: info.color }}
-                />
-                <span className="text-sm text-foreground">{info.name}</span>
+            <div key={id} className="flex flex-col">
+              <div className="flex items-center justify-between py-1">
+                <div className="flex items-center gap-2">
+                  {id === mp.playerId ? (
+                    <button
+                      onClick={() => setColorPickerOpen((v) => !v)}
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0 cursor-pointer hover:scale-150 transition-transform"
+                      style={{ background: info.color }}
+                      aria-label="Change your color"
+                    />
+                  ) : (
+                    <span
+                      className="w-2.5 h-2.5 rounded-full flex-shrink-0"
+                      style={{ background: info.color }}
+                    />
+                  )}
+                  <span className="text-sm text-foreground">{info.name}</span>
+                </div>
+                <div className="flex gap-1 items-center">
+                  {info.isHost && <Badge variant="secondary">Host</Badge>}
+                  {id === mp.playerId && <Badge variant="outline">You</Badge>}
+                  {mp.isHost && id !== mp.playerId && (
+                    <button
+                      onClick={() => kickPlayer(id)}
+                      className="ml-1 text-muted-foreground hover:text-destructive transition-colors text-base leading-none cursor-pointer"
+                      aria-label={`Kick ${info.name}`}
+                    >
+                      ×
+                    </button>
+                  )}
+                </div>
               </div>
-              <div className="flex gap-1 items-center">
-                {info.isHost && <Badge variant="secondary">Host</Badge>}
-                {id === mp.playerId && <Badge variant="outline">You</Badge>}
-                {mp.isHost && id !== mp.playerId && (
-                  <button
-                    onClick={() => kickPlayer(id)}
-                    className="ml-1 text-muted-foreground hover:text-destructive transition-colors text-base leading-none cursor-pointer"
-                    aria-label={`Kick ${info.name}`}
-                  >
-                    ×
-                  </button>
-                )}
-              </div>
+              {id === mp.playerId && colorPickerOpen && (
+                <div className="flex flex-wrap gap-1.5 pb-2 pl-4">
+                  {PLAYER_COLORS.map((color) => (
+                    <button
+                      key={color}
+                      onClick={() => { updatePlayerColor(mp.playerId, color); setColorPickerOpen(false); }}
+                      className="w-5 h-5 rounded-full cursor-pointer hover:scale-125 transition-transform flex-shrink-0"
+                      style={{
+                        background: color,
+                        outline: info.color === color ? "2px solid white" : undefined,
+                        outlineOffset: "1px",
+                      }}
+                      aria-label={color}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           ))}
           {playerCount < 2 && (

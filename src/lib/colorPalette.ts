@@ -49,9 +49,13 @@ function buildPalette(angleToHue: (a: number) => number): readonly string[] {
       const d = dist
       const hue = angleToHue(Math.atan2(dy, dx))
       const sat = Math.round(70 + d * 30)   // 70% (pastel center) → 100% (bold edge)
-      // Top edge + top-left/top-right corners are darker (bold reds, oranges, purples)
+      // Top edge + all corners/sides are darker (bold reds, oranges, purples, deep blues, etc.)
       const topWeight = Math.max(0, -dy * 2) // 0 at center, 1 at top edge
-      const lig = Math.round(80 - d * 42 - topWeight * d * 14)
+      // Corner weight: peaks at corners where both axes are near their edge
+      const cx = Math.abs(dx) / 0.5  // 0 at vertical center axis, 1 at left/right edge
+      const cy = Math.abs(dy) / 0.5  // 0 at horizontal center axis, 1 at top/bottom edge
+      const cornerWeight = Math.pow(cx * cy, 0.65) * d
+      const lig = Math.round(80 - d * 42 - topWeight * d * 10 - cornerWeight * 16)
       colors.push(hslToHex(hue, sat, lig))
     }
   }

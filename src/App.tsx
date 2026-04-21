@@ -13,6 +13,9 @@ import { MultiResultsView } from "@/views/multiplayer/MultiResultsView";
 import { ColorformClueView } from "@/views/multiplayer/ColorformClueView";
 import { ColorformGuessView } from "@/views/multiplayer/ColorformGuessView";
 import { ColorformResultsView } from "@/views/multiplayer/ColorformResultsView";
+import { Multi2DClueView } from "@/views/multiplayer/Multi2DClueView";
+import { Multi2DGuessView } from "@/views/multiplayer/Multi2DGuessView";
+import { Multi2DResultsView } from "@/views/multiplayer/Multi2DResultsView";
 
 const ROOM_VIEWS = new Set(["waitingRoom", "multiClue", "multiGuess", "multiResults"]);
 
@@ -26,11 +29,15 @@ function postLog(event: 'connect' | 'disconnect', name: string, roomId: string, 
 
 // Runs inside RoomProvider — handles host promotion when the host disconnects
 function RoomOrchestrator() {
-  const { mp, setIsHost } = useMultiplayer();
+  const { goTo } = useGame();
+  const { mp, setIsHost, clearRoom } = useMultiplayer();
   const others = useOthers();
   const players = useStorage((s) => s ? Object.entries(s.players) : []) ?? [];
   const hostId = useStorage((s) => s?.hostId);
+  const storageLoaded = useStorage((s) => s !== null);
+  const isInPlayers = players.some(([id]) => id === mp.playerId);
   const roomId = `waveform-${mp.roomCode}`;
+  const wasRegisteredRef = useRef(false);
 
   // Log own connect on mount, disconnect on unmount
   useEffect(() => {
@@ -67,6 +74,20 @@ function RoomOrchestrator() {
       setIsHost(true);
     }
   }, [hostId, mp.isHost, mp.playerId]);
+
+  // Track once the player is confirmed registered — so we can detect removal (kick)
+  useEffect(() => {
+    if (storageLoaded && isInPlayers) wasRegisteredRef.current = true;
+  }, [storageLoaded, isInPlayers]);
+
+  // Kick detection: non-host player was removed from the players map by the host
+  useEffect(() => {
+    if (!storageLoaded || !wasRegisteredRef.current || mp.isHost) return;
+    if (!isInPlayers) {
+      clearRoom();
+      goTo("start");
+    }
+  }, [storageLoaded, isInPlayers, mp.isHost]);
 
   // Detect host disconnection via presence and promote the first connected player.
   // Debounced: promotion is delayed 3s so initial presence sync (which starts empty)
@@ -130,6 +151,12 @@ function InRoomViews() {
     if (state.view === "multiResults") return <ColorformResultsView />;
   }
 
+  if (gameMode === "2d") {
+    if (state.view === "multiClue") return <Multi2DClueView />;
+    if (state.view === "multiGuess") return <Multi2DGuessView />;
+    if (state.view === "multiResults") return <Multi2DResultsView />;
+  }
+
   if (state.view === "multiClue") return <MultiClueView />;
   if (state.view === "multiGuess") return <MultiGuessView />;
   if (state.view === "multiResults") return <MultiResultsView />;
@@ -143,7 +170,7 @@ function MultiplayerRoom() {
   return (
     <RoomProvider
       id={`waveform-${mp.roomCode}`}
-      initialPresence={{ playerName: mp.playerName, cluesComplete: false, playerId: mp.playerId, dialPosition: null, reaction: null }}
+      initialPresence={{ playerName: mp.playerName, cluesComplete: false, playerId: mp.playerId, dialPosition: null, dialPositionY: null, reaction: null }}
       initialStorage={{
         phase: "lobby",
         gameMode: "classic",
@@ -161,6 +188,7 @@ function MultiplayerRoom() {
         colorPaletteName: "base",
         playerColors: new LiveMap(),
         colorOptions: new LiveMap(),
+        player2DDials: new LiveMap(),
       }}
     >
       <RoomOrchestrator />

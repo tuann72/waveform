@@ -5,7 +5,7 @@ import { useStorage, useMutation, useOthers, useUpdateMyPresence } from "@/lib/l
 import type { DialConfig } from "@/lib/liveblocks";
 import { SpectrumDial } from "@/components/game/SpectrumDial";
 import { Button } from "@/components/ui/button";
-import { calcPoints } from "@/lib/scoring";
+import { calcPoints, applyDoubleDown } from "@/lib/scoring";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { EmojiReactions } from "@/components/game/EmojiReactions";
 
@@ -26,6 +26,7 @@ export function MultiGuessView() {
   const [dialPosition, setDialPosition] = useState(50);
   const [dialResetFor, setDialResetFor] = useState<number | null>(null);
   const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
+  const [doubleDown, setDoubleDown] = useState(false);
   const isAdvancing = useRef(false);
 
   const currentEntry = queue[currentGuessIndex ?? 0];
@@ -47,9 +48,9 @@ export function MultiGuessView() {
   const authorTarget = authorDial?.targetPosition ?? 50;
 
   const recordGuess = useMutation(
-    ({ storage }, guesserId: string, dialIndex: number, authorId: string, position: number, points: number) => {
+    ({ storage }, guesserId: string, dialIndex: number, authorId: string, position: number, points: number, dd: boolean) => {
       const key = `${guesserId}-${dialIndex}-${authorId}`;
-      storage.get("guessResults").set(key, { position, points });
+      storage.get("guessResults").set(key, { position, points, doubleDown: dd });
     },
     [],
   );
@@ -76,6 +77,7 @@ export function MultiGuessView() {
   useEffect(() => {
     updateMyPresence({ dialPosition: null });
     isAdvancing.current = false;
+    setDoubleDown(false);
   }, [currentGuessIndex]);
 
   useEffect(() => {
@@ -122,8 +124,9 @@ export function MultiGuessView() {
 
   function handleLockIn() {
     if (!currentEntry || !amIGuesser) return;
-    const pts = calcPoints(dialPosition, authorTarget);
-    recordGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, dialPosition, pts);
+    const rawPts = calcPoints(dialPosition, authorTarget);
+    const pts = applyDoubleDown(rawPts, doubleDown);
+    recordGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, dialPosition, pts, doubleDown);
   }
 
   if (!queue.length || !currentEntry) {
@@ -219,12 +222,16 @@ export function MultiGuessView() {
                   <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: g.color }} />
                   <span className="text-muted-foreground">{g.name}{g.id === mp.playerId ? " (you)" : ""}</span>
                   <span className="ml-auto">
-                    {allGuessersLocked && result
-                      ? <span className="font-semibold text-foreground">+{result.points} pt{result.points !== 1 ? "s" : ""}</span>
-                      : locked
-                        ? <span className="text-muted-foreground">Locked in</span>
-                        : <span className="text-muted-foreground"><>Guessing<Ellipsis /></></span>
-                    }
+                    {allGuessersLocked && result ? (
+                      <span className="font-semibold text-foreground">
+                        {result.points >= 0 ? "+" : ""}{result.points} pt{Math.abs(result.points) !== 1 ? "s" : ""}
+                        {result.doubleDown && <span className="ml-1 text-amber-400 font-bold text-[10px]">2×</span>}
+                      </span>
+                    ) : locked ? (
+                      <span className="text-muted-foreground">Locked in</span>
+                    ) : (
+                      <span className="text-muted-foreground">Guessing<Ellipsis /></span>
+                    )}
                   </span>
                 </div>
               );
@@ -234,7 +241,20 @@ export function MultiGuessView() {
 
         {/* Actions */}
         {amIGuesser && !amILocked && (
-          <Button onClick={handleLockIn}>Lock In</Button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setDoubleDown(v => !v)}
+              title="Double your points if you score anything — lose 2 pts if you miss"
+              className={`px-3 py-2 rounded-lg border text-xs font-medium transition-colors cursor-pointer ${
+                doubleDown
+                  ? "border-amber-500 bg-amber-500/10 text-amber-500"
+                  : "border-border text-muted-foreground hover:border-amber-500/50"
+              }`}
+            >
+              Double Down{doubleDown ? " ✓" : ""}
+            </button>
+            <Button className="flex-1" onClick={handleLockIn}>Lock In</Button>
+          </div>
         )}
 
         {amIGuesser && amILocked && !allGuessersLocked && (

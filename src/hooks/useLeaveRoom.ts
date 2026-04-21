@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useGame } from "@/context/GameContext";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useStorage, useMutation, clearGameData } from "@/lib/liveblocks";
@@ -30,6 +30,16 @@ export function useLeaveRoom() {
       }
     }
   }, []);
+
+  // Best-effort room deletion on tab close / browser crash (host + last player only)
+  useEffect(() => {
+    if (!mp.isHost || players.length > 1) return;
+    const handleUnload = () => {
+      navigator.sendBeacon(`/api/delete-room?roomId=waveform-${mp.roomCode}`);
+    };
+    window.addEventListener("beforeunload", handleUnload);
+    return () => window.removeEventListener("beforeunload", handleUnload);
+  }, [mp.isHost, mp.roomCode, players.length]);
 
   async function handleLeave() {
     setLeaving(true);
