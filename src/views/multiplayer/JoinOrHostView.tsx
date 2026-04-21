@@ -16,6 +16,7 @@ export function JoinOrHostView() {
     const p = new URLSearchParams(window.location.search).get("room");
     return p ? p.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) : "";
   });
+  const codeFromUrl = !!new URLSearchParams(window.location.search).get("room");
   const [nameError, setNameError] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
 
@@ -112,7 +113,7 @@ export function JoinOrHostView() {
                 }
                 className="font-mono tracking-[0.3em] text-center text-lg uppercase"
                 maxLength={5}
-                autoFocus
+                autoFocus={!codeFromUrl}
               />
             </div>
             <Button onClick={handleJoin} disabled={code.length < 5}>

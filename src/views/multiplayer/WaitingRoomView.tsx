@@ -14,9 +14,64 @@ import { Label } from "@/components/ui/label";
 import { ROUND_OPTIONS } from "@/types/game";
 import { CARD_CATEGORIES } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
+import { Skeleton } from "@/components/ui/skeleton";
 import { QRCodeSVG } from "qrcode.react";
 import { COLOR_PALETTE, COLOR_PALETTE_DEUTERANOMALY, PALETTE_COLS } from "@/lib/colorPalette";
 import type { PaletteName } from "@/lib/colorPalette";
+
+export function WaitingRoomSkeleton() {
+  return (
+    <div className="min-h-screen flex flex-col items-center justify-center bg-background px-4">
+      <div className="w-full max-w-xs flex flex-col gap-6">
+        <div className="text-center flex flex-col items-center gap-2">
+          <Skeleton className="h-6 w-32" />
+          <Skeleton className="h-4 w-44" />
+        </div>
+        <div className="rounded-xl border bg-muted/40 px-6 py-4 flex flex-col items-center gap-3">
+          <Skeleton className="h-3 w-20" />
+          <Skeleton className="h-10 w-48" />
+          <Skeleton className="h-36 w-36 rounded-lg" />
+          <div className="grid grid-cols-2 gap-2 w-full">
+            <Skeleton className="h-8 w-full" />
+            <Skeleton className="h-8 w-full" />
+          </div>
+        </div>
+        <Skeleton className="h-px w-full" />
+        <div className="flex flex-col gap-3">
+          <Skeleton className="h-3 w-24" />
+          <div className="grid grid-cols-2 gap-2">
+            <Skeleton className="h-11 w-full rounded-lg" />
+            <Skeleton className="h-11 w-full rounded-lg" />
+          </div>
+          <Skeleton className="h-11 w-full rounded-lg" />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-3 w-12" />
+            <Skeleton className="h-9 w-full rounded-md" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-9 w-full rounded-md" />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Skeleton className="h-3 w-20" />
+            <Skeleton className="h-9 w-full rounded-md" />
+          </div>
+        </div>
+        <Skeleton className="h-px w-full" />
+        <div className="flex flex-col gap-2">
+          <Skeleton className="h-3 w-16" />
+          <div className="flex items-center gap-2 py-1">
+            <Skeleton className="h-2.5 w-2.5 rounded-full flex-shrink-0" />
+            <Skeleton className="h-4 w-24" />
+          </div>
+        </div>
+        <Skeleton className="h-9 w-full rounded-md" />
+      </div>
+    </div>
+  );
+}
 
 function MiniPalettePreview({ palette }: { palette: readonly string[] }) {
   return (

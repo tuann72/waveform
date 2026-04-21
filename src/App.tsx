@@ -6,7 +6,7 @@ import { MultiplayerProvider, useMultiplayer, getRoomId } from "@/context/Multip
 import { RoomProvider, useStorage, useMutation, useOthers } from "@/lib/liveblocks";
 import { StartView } from "@/views/StartView";
 import { JoinOrHostView } from "@/views/multiplayer/JoinOrHostView";
-import { WaitingRoomView } from "@/views/multiplayer/WaitingRoomView";
+import { WaitingRoomView, WaitingRoomSkeleton } from "@/views/multiplayer/WaitingRoomView";
 import { MultiClueView } from "@/views/multiplayer/MultiClueView";
 import { MultiGuessView } from "@/views/multiplayer/MultiGuessView";
 import { MultiResultsView } from "@/views/multiplayer/MultiResultsView";
@@ -288,13 +288,16 @@ function MultiplayerRoom() {
       }}
     >
       {!verified ? (
-        <RoomVerifier
-          password={password}
-          isHost={mp.isHost}
-          onVerified={() => setVerified(true)}
-          onSlotTaken={handleSlotTaken}
-          onInvalidCode={() => setError("invalid")}
-        />
+        <>
+          <RoomVerifier
+            password={password}
+            isHost={mp.isHost}
+            onVerified={() => setVerified(true)}
+            onSlotTaken={handleSlotTaken}
+            onInvalidCode={() => setError("invalid")}
+          />
+          <WaitingRoomSkeleton />
+        </>
       ) : (
         <>
           <RoomOrchestrator />
