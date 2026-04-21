@@ -152,7 +152,12 @@ export function ColorformClueView() {
         }
       }
       storage.set("currentGuessIndex", 0);
-      storage.set("phase", queue.length > 0 ? "guessing" : "results");
+      if (queue.length > 0) {
+        storage.set("guessPhaseStartTime", Date.now());
+        storage.set("phase", "guessing");
+      } else {
+        storage.set("phase", "results");
+      }
     },
     [],
   );
@@ -279,7 +284,7 @@ export function ColorformClueView() {
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4 py-8">
-      <div className="w-full max-w-sm flex flex-col gap-5">
+      <div className="w-full max-w-xl flex flex-col gap-5">
         <div className="text-center">
           <h2 className="text-xl font-semibold">Pick & Describe</h2>
           <p className="text-sm text-muted-foreground mt-1">
@@ -342,13 +347,13 @@ export function ColorformClueView() {
               <p className="text-xs text-muted-foreground uppercase tracking-widest">
                 Pick one color to describe
               </p>
-              <div className="flex justify-center gap-4">
+              <div className="flex justify-center gap-6">
                 {currentOptions.map((colorIdx) => (
                   <button
                     key={colorIdx}
                     onClick={() => handleSelectColor(colorIdx)}
                     className={cn(
-                      "w-20 h-20 rounded-2xl transition-all focus:outline-none cursor-pointer",
+                      "w-40 h-40 rounded-3xl transition-all focus:outline-none cursor-pointer",
                       currentSelectedIndex === colorIdx
                         ? "scale-110 shadow-xl"
                         : "opacity-80 hover:opacity-100 hover:scale-105",

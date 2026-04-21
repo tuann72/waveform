@@ -127,8 +127,12 @@ export function MultiClueView() {
       }
 
       storage.set("currentGuessIndex", 0);
-      // If no one wrote any clues at all, jump straight to results
-      storage.set("phase", lb.length > 0 ? "guessing" : "results");
+      if (lb.length > 0) {
+        storage.set("guessPhaseStartTime", Date.now());
+        storage.set("phase", "guessing");
+      } else {
+        storage.set("phase", "results");
+      }
     },
     [],
   );

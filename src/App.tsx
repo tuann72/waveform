@@ -1,8 +1,8 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { LiveList, LiveMap } from "@liveblocks/client";
 import { ThemeProvider } from "@/components/theme-provider";
 import { GameProvider, useGame } from "@/context/GameContext";
-import { MultiplayerProvider, useMultiplayer } from "@/context/MultiplayerContext";
+import { MultiplayerProvider, useMultiplayer, getRoomId } from "@/context/MultiplayerContext";
 import { RoomProvider, useStorage, useMutation, useOthers } from "@/lib/liveblocks";
 import { StartView } from "@/views/StartView";
 import { JoinOrHostView } from "@/views/multiplayer/JoinOrHostView";
@@ -36,7 +36,7 @@ function RoomOrchestrator() {
   const hostId = useStorage((s) => s?.hostId);
   const storageLoaded = useStorage((s) => s !== null);
   const isInPlayers = players.some(([id]) => id === mp.playerId);
-  const roomId = `waveform-${mp.roomCode}`;
+  const roomId = getRoomId(mp.roomCode);
   const wasRegisteredRef = useRef(false);
 
   // Log own connect on mount, disconnect on unmount
@@ -163,13 +163,106 @@ function InRoomViews() {
   return null;
 }
 
+// Runs inside RoomProvider — verifies slot ownership (host) or password match (joiner).
+// Host: atomically claims the slot if empty or stale; retries next slot if actively occupied.
+// Joiner: confirms roomPassword matches; rejects on mismatch or empty room.
+interface RoomVerifierProps {
+  password: string;
+  isHost: boolean;
+  onVerified: () => void;
+  onSlotTaken: () => void;
+  onInvalidCode: () => void;
+}
+
+function RoomVerifier({ password, isHost, onVerified, onSlotTaken, onInvalidCode }: RoomVerifierProps) {
+  const storageLoaded = useStorage((s) => s !== null);
+  const roomPassword = useStorage((s) => s?.roomPassword ?? null);
+  const playerCount = useStorage((s) => s ? Object.keys(s.players).length : 0) ?? 0;
+  const claimAttempted = useRef(false);
+
+  const claimSlot = useMutation(({ storage }, pw: string) => {
+    const existing = (storage.get("roomPassword") as string | null | undefined) ?? null;
+    const size = storage.get("players").size;
+    // Claim if unclaimed or stale (password set but room has no active players)
+    if (existing === null || size === 0) {
+      storage.set("roomPassword", pw);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!storageLoaded) return;
+
+    if (isHost) {
+      // Actively occupied — skip this slot immediately
+      if (roomPassword !== null && playerCount > 0) {
+        onSlotTaken();
+        return;
+      }
+      if (!claimAttempted.current) {
+        claimAttempted.current = true;
+        claimSlot(password);
+        return; // wait for storage to reflect the mutation
+      }
+      // Mutation settled — check if we own the slot
+      if (roomPassword === password) {
+        onVerified();
+      } else {
+        // Lost the race to another simultaneous host
+        onSlotTaken();
+      }
+    } else {
+      if (roomPassword === null) {
+        onInvalidCode(); // room is empty/unclaimed — no active game
+      } else if (roomPassword === password) {
+        onVerified();
+      } else {
+        onInvalidCode();
+      }
+    }
+  }, [storageLoaded, roomPassword, playerCount]);
+
+  return null;
+}
+
 function MultiplayerRoom() {
-  const { mp } = useMultiplayer();
+  const { mp, tryNextSlot } = useMultiplayer();
+  const { goTo } = useGame();
   const { state } = useGame();
+  const [verified, setVerified] = useState(false);
+  const [error, setError] = useState<"full" | "invalid" | null>(null);
+
+  const roomId = getRoomId(mp.roomCode);
+  const password = mp.roomCode.slice(1); // last 4 chars
+
+  function handleSlotTaken() {
+    const hasMore = tryNextSlot();
+    if (!hasMore) setError("full");
+    // if hasMore: roomCode changes → key prop changes → RoomProvider remounts
+  }
+
+  if (error) {
+    const msg = error === "full"
+      ? "All rooms are full. Try again in a moment."
+      : "Invalid or expired room code.";
+    return (
+      <div className="min-h-screen flex items-center justify-center bg-background px-4">
+        <div className="text-center flex flex-col gap-4 max-w-xs">
+          <p className="text-muted-foreground">{msg}</p>
+          <button
+            className="text-sm underline underline-offset-4 cursor-pointer"
+            onClick={() => { setError(null); goTo("joinOrHost"); }}
+          >
+            ← Back
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <RoomProvider
-      id={`waveform-${mp.roomCode}`}
+      key={roomId}
+      id={roomId}
       initialPresence={{ playerName: mp.playerName, cluesComplete: false, playerId: mp.playerId, dialPosition: null, dialPositionY: null, reaction: null }}
       initialStorage={{
         phase: "lobby",
@@ -177,8 +270,11 @@ function MultiplayerRoom() {
         totalRounds: state.totalRounds,
         clueTimerDuration: 90,
         cluePhaseStartTime: null,
+        guessTimerDuration: 90,
+        guessPhaseStartTime: null,
         selectedCategories: [],
         hostId: mp.playerId,
+        roomPassword: null,
         players: new LiveMap(),
         playerDials: new LiveMap(),
         playerClues: new LiveMap(),
@@ -191,9 +287,21 @@ function MultiplayerRoom() {
         player2DDials: new LiveMap(),
       }}
     >
-      <RoomOrchestrator />
-      <RoomNavigator />
-      <InRoomViews />
+      {!verified ? (
+        <RoomVerifier
+          password={password}
+          isHost={mp.isHost}
+          onVerified={() => setVerified(true)}
+          onSlotTaken={handleSlotTaken}
+          onInvalidCode={() => setError("invalid")}
+        />
+      ) : (
+        <>
+          <RoomOrchestrator />
+          <RoomNavigator />
+          <InRoomViews />
+        </>
+      )}
     </RoomProvider>
   );
 }

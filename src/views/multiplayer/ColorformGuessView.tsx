@@ -1,92 +1,136 @@
-import { useEffect, useRef, useState } from "react"
-import { useGame } from "@/context/GameContext"
-import { useMultiplayer } from "@/context/MultiplayerContext"
-import { useStorage, useMutation } from "@/lib/liveblocks"
-import { ColorGrid } from "@/components/game/ColorGrid"
-import { EmojiReactions } from "@/components/game/EmojiReactions"
-import { Button } from "@/components/ui/button"
-import { Ellipsis } from "@/components/ui/ellipsis"
-import { calcColorPoints, getPalette } from "@/lib/colorPalette"
-import type { PaletteName } from "@/lib/colorPalette"
+import { useEffect, useRef, useState } from "react";
+import { useGame } from "@/context/GameContext";
+import { useMultiplayer } from "@/context/MultiplayerContext";
+import { useStorage, useMutation } from "@/lib/liveblocks";
+import { ColorGrid } from "@/components/game/ColorGrid";
+import { EmojiReactions } from "@/components/game/EmojiReactions";
+import { Button } from "@/components/ui/button";
+import { Ellipsis } from "@/components/ui/ellipsis";
+import { calcColorPoints, getPalette } from "@/lib/colorPalette";
+import type { PaletteName } from "@/lib/colorPalette";
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60);
+  const s = seconds % 60;
+  return m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
+}
 
 export function ColorformGuessView() {
-  const { goTo } = useGame()
-  const { mp } = useMultiplayer()
+  const { goTo } = useGame();
+  const { mp } = useMultiplayer();
 
-  const players = useStorage((s) => (s ? Object.entries(s.players) : [])) ?? []
-  const playerColors = useStorage((s) =>
-    s ? (s.playerColors as Record<string, number[]>) : ({} as Record<string, number[]>),
-  ) ?? {}
-  const playerClues = useStorage((s) =>
-    s ? (s.playerClues as Record<string, string[]>) : ({} as Record<string, string[]>),
-  ) ?? {}
-  const queue = useStorage((s) => (s ? [...s.guessingQueue] : [])) ?? []
-  const currentGuessIndex = useStorage((s) => s?.currentGuessIndex ?? 0) ?? 0
-  const guessResults = useStorage((s) =>
-    s
-      ? (s.guessResults as Record<string, { position: number; points: number }>)
-      : ({} as Record<string, { position: number; points: number }>),
-  ) ?? {}
-  const phase = useStorage((s) => s?.phase)
-  const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName
-  const palette = getPalette(colorPaletteName)
+  const players = useStorage((s) => (s ? Object.entries(s.players) : [])) ?? [];
+  const playerColors =
+    useStorage((s) =>
+      s
+        ? (s.playerColors as Record<string, number[]>)
+        : ({} as Record<string, number[]>),
+    ) ?? {};
+  const playerClues =
+    useStorage((s) =>
+      s
+        ? (s.playerClues as Record<string, string[]>)
+        : ({} as Record<string, string[]>),
+    ) ?? {};
+  const queue = useStorage((s) => (s ? [...s.guessingQueue] : [])) ?? [];
+  const currentGuessIndex = useStorage((s) => s?.currentGuessIndex ?? 0) ?? 0;
+  const guessResults =
+    useStorage((s) =>
+      s
+        ? (s.guessResults as Record<
+            string,
+            { position: number; points: number }
+          >)
+        : ({} as Record<string, { position: number; points: number }>),
+    ) ?? {};
+  const phase = useStorage((s) => s?.phase);
+  const guessTimerDuration = useStorage((s) => s?.guessTimerDuration ?? 90) ?? 90;
+  const guessPhaseStartTime = useStorage((s) => s?.guessPhaseStartTime ?? null) ?? null;
+  const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ??
+    "base") as PaletteName;
+  const palette = getPalette(colorPaletteName);
 
-  const [selectedColorIndex, setSelectedColorIndex] = useState<number | null>(null)
-  const [resetFor, setResetFor] = useState<number | null>(null)
-  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null)
-  const isAdvancing = useRef(false)
+  const [selectedColorIndex, setSelectedColorIndex] = useState<number | null>(
+    null,
+  );
+  const [resetFor, setResetFor] = useState<number | null>(null);
+  const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
+  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const isAdvancing = useRef(false);
+  const savedOnExpiryRef = useRef(false);
 
-  const currentEntry = queue[currentGuessIndex ?? 0]
-  const amIAuthor = currentEntry?.authorId === mp.playerId
+  const currentEntry = queue[currentGuessIndex ?? 0];
+  const amIAuthor = currentEntry?.authorId === mp.playerId;
 
   const guessers = players
     .filter(([id]) => id !== currentEntry?.authorId)
-    .map(([id, info]) => ({ id, color: info.color, name: info.name }))
-  const amIGuesser = guessers.some((g) => g.id === mp.playerId)
+    .map(([id, info]) => ({ id, color: info.color, name: info.name }));
+  const amIGuesser = guessers.some((g) => g.id === mp.playerId);
 
   const allGuessersLocked =
     guessers.length > 0 &&
     !!currentEntry &&
     guessers.every((g) => {
-      const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`
-      return !!guessResults[key]
-    })
+      const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+      return !!guessResults[key];
+    });
 
-  const authorTarget = playerColors[currentEntry?.authorId ?? ""]?.[currentEntry?.dialIndex ?? 0]
+  const authorTarget =
+    playerColors[currentEntry?.authorId ?? ""]?.[currentEntry?.dialIndex ?? 0];
 
   if (currentGuessIndex !== resetFor) {
-    setResetFor(currentGuessIndex ?? 0)
-    setSelectedColorIndex(null)
+    setResetFor(currentGuessIndex ?? 0);
+    setSelectedColorIndex(null);
   }
 
   useEffect(() => {
-    isAdvancing.current = false
-  }, [currentGuessIndex])
+    isAdvancing.current = false;
+    savedOnExpiryRef.current = false;
+  }, [currentGuessIndex]);
+
+  // Guess countdown timer
+  useEffect(() => {
+    if (!guessTimerDuration || !guessPhaseStartTime) return;
+    const tick = () => setTimeLeft(Math.max(0, guessTimerDuration - Math.floor((Date.now() - guessPhaseStartTime) / 1000)));
+    tick();
+    const interval = setInterval(tick, 200);
+    return () => clearInterval(interval);
+  }, [guessTimerDuration, guessPhaseStartTime]);
+
+  // Auto-lock-in when guess timer expires
+  useEffect(() => {
+    if (timeLeft !== 0 || !guessTimerDuration || savedOnExpiryRef.current || !amIGuesser || !currentEntry || selectedColorIndex === null) return;
+    const alreadyLocked = !!guessResults[`${mp.playerId}-${currentEntry.dialIndex}-${currentEntry.authorId}`];
+    if (alreadyLocked) return;
+    savedOnExpiryRef.current = true;
+    const pts = calcColorPoints(selectedColorIndex, authorTarget ?? 0);
+    recordGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, selectedColorIndex, pts);
+  }, [timeLeft]);
 
   useEffect(() => {
-    if (phase === "results") goTo("multiResults")
-  }, [phase, goTo])
+    if (phase === "results") goTo("multiResults");
+  }, [phase, goTo]);
 
   useEffect(() => {
-    document.body.style.overflow = "hidden"
+    document.body.style.overflow = "hidden";
     return () => {
-      document.body.style.overflow = ""
-    }
-  }, [])
+      document.body.style.overflow = "";
+    };
+  }, []);
 
   useEffect(() => {
-    if (!allGuessersLocked) return
-    const DURATION = 12
-    const startTime = Date.now()
+    if (!allGuessersLocked) return;
+    const DURATION = 12;
+    const startTime = Date.now();
     const interval = setInterval(() => {
-      const elapsed = Math.floor((Date.now() - startTime) / 1000)
-      setAutoAdvanceTimer(Math.max(0, DURATION - elapsed))
-    }, 200)
+      const elapsed = Math.floor((Date.now() - startTime) / 1000);
+      setAutoAdvanceTimer(Math.max(0, DURATION - elapsed));
+    }, 200);
     return () => {
-      clearInterval(interval)
-      setAutoAdvanceTimer(null)
-    }
-  }, [allGuessersLocked, currentGuessIndex])
+      clearInterval(interval);
+      setAutoAdvanceTimer(null);
+    };
+  }, [allGuessersLocked, currentGuessIndex]);
 
   const recordGuess = useMutation(
     (
@@ -97,70 +141,96 @@ export function ColorformGuessView() {
       colorIndex: number,
       points: number,
     ) => {
-      const key = `${guesserId}-${dialIndex}-${authorId}`
-      storage.get("guessResults").set(key, { position: colorIndex, points })
+      const key = `${guesserId}-${dialIndex}-${authorId}`;
+      storage.get("guessResults").set(key, { position: colorIndex, points });
     },
     [],
-  )
+  );
 
   const advanceGuess = useMutation(({ storage }) => {
-    const current = storage.get("currentGuessIndex")
-    const nextIndex = current + 1
-    storage.set("currentGuessIndex", nextIndex)
+    const current = storage.get("currentGuessIndex");
+    const nextIndex = current + 1;
+    storage.set("currentGuessIndex", nextIndex);
     if (nextIndex >= storage.get("guessingQueue").length) {
-      storage.set("phase", "results")
+      storage.set("phase", "results");
+    } else {
+      storage.set("guessPhaseStartTime", Date.now());
     }
-  }, [])
+  }, []);
 
   useEffect(() => {
-    if (autoAdvanceTimer === 0 && amIAuthor && allGuessersLocked && !isAdvancing.current) {
-      isAdvancing.current = true
-      advanceGuess()
+    if (
+      autoAdvanceTimer === 0 &&
+      amIAuthor &&
+      allGuessersLocked &&
+      !isAdvancing.current
+    ) {
+      isAdvancing.current = true;
+      advanceGuess();
     }
-  }, [autoAdvanceTimer, amIAuthor, allGuessersLocked, advanceGuess])
+  }, [autoAdvanceTimer, amIAuthor, allGuessersLocked, advanceGuess]);
 
   function handleLockIn() {
-    if (!currentEntry || !amIGuesser || selectedColorIndex === null) return
-    const pts = calcColorPoints(selectedColorIndex, authorTarget ?? 0)
-    recordGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, selectedColorIndex, pts)
+    if (!currentEntry || !amIGuesser || selectedColorIndex === null) return;
+    const pts = calcColorPoints(selectedColorIndex, authorTarget ?? 0);
+    recordGuess(
+      mp.playerId,
+      currentEntry.dialIndex,
+      currentEntry.authorId,
+      selectedColorIndex,
+      pts,
+    );
   }
 
   function handleAdvance() {
-    if (isAdvancing.current) return
-    isAdvancing.current = true
-    advanceGuess()
+    if (isAdvancing.current) return;
+    isAdvancing.current = true;
+    advanceGuess();
   }
 
   if (!queue.length || !currentEntry) {
     return (
       <div className="h-screen flex items-center justify-center">
-        <p className="text-muted-foreground">Loading<Ellipsis /></p>
+        <p className="text-muted-foreground">
+          Loading
+          <Ellipsis />
+        </p>
       </div>
-    )
+    );
   }
 
-  const authorName = players.find(([id]) => id === currentEntry.authorId)?.[1].name ?? "?"
-  const clue = playerClues[currentEntry.authorId]?.[currentEntry.dialIndex] ?? ""
+  const authorName =
+    players.find(([id]) => id === currentEntry.authorId)?.[1].name ?? "?";
+  const clue =
+    playerClues[currentEntry.authorId]?.[currentEntry.dialIndex] ?? "";
 
   const myResultKey = amIGuesser
     ? `${mp.playerId}-${currentEntry.dialIndex}-${currentEntry.authorId}`
-    : null
-  const myResult = myResultKey ? guessResults[myResultKey] : undefined
-  const amILocked = !!myResult
+    : null;
+  const myResult = myResultKey ? guessResults[myResultKey] : undefined;
+  const amILocked = !!myResult;
 
   const guessMarkers = allGuessersLocked
     ? guessers.flatMap((g) => {
-        const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`
-        const result = guessResults[key]
-        return result !== undefined ? [{ index: result.position, playerColor: g.color }] : []
+        const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+        const result = guessResults[key];
+        return result !== undefined
+          ? [{ index: result.position, playerColor: g.color }]
+          : [];
       })
-    : []
+    : [];
 
-  const displayColorIndex = amILocked ? myResult!.position : selectedColorIndex
-  const currentRound = currentEntry.dialIndex + 1
-  const totalDialRounds = Math.max(...queue.map((e) => e.dialIndex)) + 1
+  const displayColorIndex = amILocked ? myResult!.position : selectedColorIndex;
+  const currentRound = currentEntry.dialIndex + 1;
+  const totalDialRounds = Math.max(...queue.map((e) => e.dialIndex)) + 1;
 
-  const scoreRadiusCenter = allGuessersLocked ? authorTarget : undefined
+  const scoreRadiusCenter = allGuessersLocked ? authorTarget : undefined;
+
+  const timerActive = guessTimerDuration > 0 && guessPhaseStartTime !== null && !allGuessersLocked;
+  const timerPercent = timerActive && timeLeft !== null && guessTimerDuration > 0
+    ? (timeLeft / guessTimerDuration) * 100 : 100;
+  const timerBarColor = timerPercent > 30 ? "bg-primary" : timerPercent > 10 ? "bg-amber-500" : "bg-red-500";
+  const timerTextColor = timerPercent <= 10 ? "text-red-500" : timerPercent <= 30 ? "text-amber-500" : "text-foreground";
 
   return (
     <div className="h-screen overflow-y-auto flex flex-col items-center bg-background pb-20">
@@ -179,8 +249,25 @@ export function ColorformGuessView() {
           </p>
         </div>
 
+        {/* Guess timer bar */}
+        {timerActive && (
+          <div className="flex flex-col gap-1.5">
+            <div className="flex justify-between items-center">
+              <span className="text-xs text-muted-foreground">Time remaining</span>
+              <span className={`text-sm font-mono font-semibold tabular-nums ${timerTextColor}`}>
+                {timeLeft === 0 ? "Time's up!" : formatTime(timeLeft ?? 0)}
+              </span>
+            </div>
+            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
+              <div className={`h-full rounded-full transition-all duration-500 ${timerBarColor}`} style={{ width: `${timerPercent}%` }} />
+            </div>
+          </div>
+        )}
+
         <div className="rounded-xl border bg-muted/40 px-6 py-4 text-center">
-          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">Clue</p>
+          <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
+            Clue
+          </p>
           <p className="text-2xl font-semibold text-foreground">{clue}</p>
         </div>
 
@@ -190,16 +277,19 @@ export function ColorformGuessView() {
               className="w-6 h-6 rounded flex-shrink-0 border border-border"
               style={{ background: palette[authorTarget] }}
             />
-            <span className="text-xs text-muted-foreground">Your chosen color</span>
+            <span className="text-xs text-muted-foreground">
+              Your chosen color
+            </span>
           </div>
         )}
       </div>
 
-      <div className="w-full max-w-[300px] mx-auto px-2 mt-3">
+      <div className="w-full max-w-[1000px] mx-auto px-2 mt-3">
         <ColorGrid
           selectedIndex={displayColorIndex}
           onSelect={amIGuesser && !amILocked ? setSelectedColorIndex : () => {}}
           scoreRadiusCenter={scoreRadiusCenter}
+          targetIndex={scoreRadiusCenter}
           guessMarkers={guessMarkers}
           disabled={!amIGuesser || amILocked || amIAuthor}
           palette={palette}
@@ -207,7 +297,6 @@ export function ColorformGuessView() {
       </div>
 
       <div className="w-full max-w-sm px-4 mt-4 flex flex-col gap-4">
-
         {amIGuesser && !amILocked && (
           <div className="flex items-center gap-3">
             <div
@@ -242,7 +331,8 @@ export function ColorformGuessView() {
                 </p>
               ) : (
                 <p className="text-sm text-muted-foreground">
-                  Locked in — waiting for others<Ellipsis />
+                  Locked in — waiting for others
+                  <Ellipsis />
                 </p>
               )}
             </div>
@@ -252,9 +342,9 @@ export function ColorformGuessView() {
         {(amIAuthor || amILocked || allGuessersLocked) && (
           <div className="flex flex-col gap-1.5">
             {guessers.map((g) => {
-              const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`
-              const result = guessResults[key]
-              const locked = !!result
+              const key = `${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`;
+              const result = guessResults[key];
+              const locked = !!result;
               return (
                 <div key={g.id} className="flex items-center gap-2 text-xs">
                   <span
@@ -280,12 +370,13 @@ export function ColorformGuessView() {
                       <span className="text-muted-foreground">Locked in</span>
                     ) : (
                       <span className="text-muted-foreground">
-                        Picking<Ellipsis />
+                        Picking
+                        <Ellipsis />
                       </span>
                     )}
                   </span>
                 </div>
-              )
+              );
             })}
           </div>
         )}
@@ -327,10 +418,11 @@ export function ColorformGuessView() {
 
         {amIAuthor && !allGuessersLocked && (
           <p className="text-sm text-center text-muted-foreground">
-            Watching guesses come in<Ellipsis />
+            Watching guesses come in
+            <Ellipsis />
           </p>
         )}
       </div>
     </div>
-  )
+  );
 }

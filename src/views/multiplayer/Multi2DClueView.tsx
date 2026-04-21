@@ -81,7 +81,7 @@ export function Multi2DClueView() {
     setClues(Array(myDials.length).fill(""))
   }
 
-  const effectiveTimerDuration = clueTimerDuration * totalRounds
+  const effectiveTimerDuration = clueTimerDuration * totalRounds * 2
   const timerActive = clueTimerDuration > 0 && cluePhaseStartTime !== null
 
   useEffect(() => {
@@ -124,7 +124,12 @@ export function Multi2DClueView() {
       }
     }
     storage.set("currentGuessIndex", 0)
-    storage.set("phase", lb.length > 0 ? "guessing" : "results")
+    if (lb.length > 0) {
+      storage.set("guessPhaseStartTime", Date.now())
+      storage.set("phase", "guessing")
+    } else {
+      storage.set("phase", "results")
+    }
   }, [])
 
   const rerollDial2D = useMutation(({ storage }, playerId: string, roundIndex: number, categories: string[]) => {

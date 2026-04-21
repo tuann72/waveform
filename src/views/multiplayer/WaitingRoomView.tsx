@@ -101,11 +101,11 @@ const COPY_FEEDBACK_MS = 2000;
 const NO_HOST_TIMEOUT_MS = 8000;
 
 const TIMER_OPTIONS = [
-  { value: 30, label: "30s" },
-  { value: 60, label: "1 min" },
-  { value: 90, label: "90s" },
-  { value: 120, label: "2 min" },
-  { value: 0, label: "No limit" },
+  { value: 30, label: "30s", label2x: "1 min" },
+  { value: 60, label: "1 min", label2x: "2 min" },
+  { value: 90, label: "90s", label2x: "3 min" },
+  { value: 120, label: "2 min", label2x: "4 min" },
+  { value: 0, label: "No limit", label2x: "No limit" },
 ];
 
 const PLAYER_COLORS = [
@@ -128,6 +128,7 @@ export function WaitingRoomView() {
   const totalRounds = useStorage((s) => s?.totalRounds ?? state.totalRounds);
   const gameMode = useStorage((s) => s?.gameMode ?? "classic");
   const clueTimerDuration = useStorage((s) => s?.clueTimerDuration ?? 90);
+  const guessTimerDuration = useStorage((s) => s?.guessTimerDuration ?? 90);
   const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
   const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName;
 
@@ -149,6 +150,7 @@ export function WaitingRoomView() {
     clearGameData(storage);
     for (const k of players.keys()) players.delete(k);
     players.set(id, { name, isHost: true, color: PLAYER_COLORS[0] });
+    storage.set("hostId", id);
   }, []);
 
   // Non-host registration — enforces 12-player cap
@@ -207,10 +209,17 @@ export function WaitingRoomView() {
 
   const setGameMode = useMutation(({ storage }, mode: GameMode) => {
     storage.set("gameMode", mode);
+    const defaultTimer = mode === "2d" ? 60 : 90;
+    storage.set("clueTimerDuration", defaultTimer);
+    storage.set("guessTimerDuration", defaultTimer);
   }, []);
 
   const setClueTimer = useMutation(({ storage }, duration: number) => {
     storage.set("clueTimerDuration", duration);
+  }, []);
+
+  const setGuessTimer = useMutation(({ storage }, duration: number) => {
+    storage.set("guessTimerDuration", duration);
   }, []);
 
   const setSelectedCategories = useMutation(({ storage }, cats: string[]) => {
@@ -408,8 +417,25 @@ export function WaitingRoomView() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TIMER_OPTIONS.map(({ value, label }) => (
-                  <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+                {TIMER_OPTIONS.map(({ value, label, label2x }) => (
+                  <SelectItem key={value} value={String(value)}>{gameMode === "2d" ? label2x : label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label className="text-xs text-muted-foreground">Guess Timer</Label>
+            <Select
+              value={String(guessTimerDuration ?? 90)}
+              onValueChange={(v) => setGuessTimer(Number(v))}
+              disabled={!mp.isHost}
+            >
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {TIMER_OPTIONS.map(({ value, label, label2x }) => (
+                  <SelectItem key={value} value={String(value)}>{gameMode === "2d" ? label2x : label}</SelectItem>
                 ))}
               </SelectContent>
             </Select>

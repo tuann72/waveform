@@ -14,7 +14,7 @@ export function JoinOrHostView() {
   });
   const [code, setCode] = useState(() => {
     const p = new URLSearchParams(window.location.search).get("room");
-    return p ? p.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6) : "";
+    return p ? p.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5) : "";
   });
   const [nameError, setNameError] = useState(false);
   const nameRef = useRef<HTMLInputElement>(null);
@@ -39,7 +39,7 @@ export function JoinOrHostView() {
 
   function handleJoin() {
     if (!requireName()) return;
-    if (code.length < 6) return;
+    if (code.length < 5) return;
     joinRoom(code);
     goTo("waitingRoom");
   }
@@ -105,17 +105,17 @@ export function JoinOrHostView() {
               <Label htmlFor="room-code">Room code</Label>
               <Input
                 id="room-code"
-                placeholder="XXXXXX"
+                placeholder="XXXXX"
                 value={code}
                 onChange={(e) =>
-                  setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 6))
+                  setCode(e.target.value.toUpperCase().replace(/[^A-Z0-9]/g, "").slice(0, 5))
                 }
                 className="font-mono tracking-[0.3em] text-center text-lg uppercase"
-                maxLength={6}
+                maxLength={5}
                 autoFocus
               />
             </div>
-            <Button onClick={handleJoin} disabled={code.length < 6}>
+            <Button onClick={handleJoin} disabled={code.length < 5}>
               Join Room
             </Button>
           </div>

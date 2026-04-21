@@ -56,8 +56,11 @@ export type Storage = {
   totalRounds: number;
   clueTimerDuration: number;      // seconds; 0 = no limit
   cluePhaseStartTime: number | null;
+  guessTimerDuration: number;     // seconds; 0 = no limit; same options as clue timer
+  guessPhaseStartTime: number | null;  // reset for each queue entry
   selectedCategories: string[];   // empty = all categories
   hostId: string;
+  roomPassword: string | null;
   players: LiveMap<string, PlayerInfo>;
   playerDials: LiveMap<string, DialConfig[]>;
   playerClues: LiveMap<string, string[]>;
@@ -73,11 +76,19 @@ export type Storage = {
 };
 
 // Clears all per-game data from storage. Does NOT touch players, gameMode,
-// totalRounds, clueTimerDuration, selectedCategories, or hostId.
+// totalRounds, clueTimerDuration, guessTimerDuration, selectedCategories, or hostId.
 // Call this inside any mutation that needs to reset between games.
 export function clearGameData(storage: LiveObject<Storage>) {
   storage.set("phase", "lobby");
   storage.set("currentGuessIndex", 0);
+  storage.set("cluePhaseStartTime", null);
+  storage.set("guessPhaseStartTime", null);
+  storage.set("gameMode", "classic");
+  storage.set("totalRounds", 3);
+  storage.set("clueTimerDuration", 90);
+  storage.set("guessTimerDuration", 90);
+  storage.set("selectedCategories", []);
+  storage.set("colorPaletteName", "base");
   const playerDials = storage.get("playerDials");
   for (const k of playerDials.keys()) playerDials.delete(k);
   const playerClues = storage.get("playerClues");

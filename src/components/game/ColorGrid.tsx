@@ -124,10 +124,13 @@ export function ColorGrid({
       >
         {renderZoneBorders(idx)}
         {isTarget && (
-          <span
-            className="absolute inset-0 pointer-events-none"
-            style={{ boxShadow: "inset 0 0 0 3px white, inset 0 0 0 5px rgba(0,0,0,0.6)", background: "rgba(255,255,255,0.25)" }}
-          />
+          <>
+            <span className="absolute inset-0 pointer-events-none" style={{ background: "rgba(255,255,255,0.2)" }} />
+            <span className="absolute top-0 left-0 right-0 pointer-events-none" style={{ height: BORDER_THICK, background: BORDER_Z1 }} />
+            <span className="absolute bottom-0 left-0 right-0 pointer-events-none" style={{ height: BORDER_THICK, background: BORDER_Z1 }} />
+            <span className="absolute top-0 left-0 bottom-0 pointer-events-none" style={{ width: BORDER_THICK, background: BORDER_Z1 }} />
+            <span className="absolute top-0 right-0 bottom-0 pointer-events-none" style={{ width: BORDER_THICK, background: BORDER_Z1 }} />
+          </>
         )}
         {isSelected && (
           <span className="absolute inset-0 flex items-center justify-center pointer-events-none">
