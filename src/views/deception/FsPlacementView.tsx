@@ -18,7 +18,7 @@ export function FsPlacementView() {
 
   const sceneTiles = useStorage((s) => s?.deceptionSceneTiles ?? null);
   const tilePool = useStorage((s) => s?.deceptionTilePool ?? []) ?? [];
-  const hasSwapped = useStorage((s) => s?.deceptionFsHasSwappedThisRound ?? false) ?? false;
+  const rerolledTiles = useStorage((s) => s?.deceptionFsRerolledTiles ?? []) ?? [];
   const markers = useStorage((s) =>
     s ? (s.deceptionMarkers as Record<string, number>) : {}
   ) ?? {};
@@ -38,7 +38,6 @@ export function FsPlacementView() {
 
   const [myRole, setMyRole] = useState<DeceptionRoleBlob | null>(null);
   const [fsSolution, setFsSolution] = useState<MurdererSolution | null>(null);
-  const [swapTarget, setSwapTarget] = useState<number | null>(null);
 
   const timeLeft = useCountdown(fsTimerStart, fsTimerDuration, 500);
   const isFs = myRole?.role === "forensic-scientist";
@@ -64,11 +63,13 @@ export function FsPlacementView() {
     storage.get("deceptionMarkers").set(category, optionIndex);
   }, []);
 
-  const swapTile = useMutation(({ storage }, tileIndex: number) => {
+  const rerollTile = useMutation(({ storage }, tileIndex: number) => {
     const pool = storage.get("deceptionTilePool") as Array<{ category: string; options: string[] }>;
     const tiles = storage.get("deceptionSceneTiles") as Array<{ category: string; options: string[] }> | null;
     if (!pool || pool.length === 0 || !tiles) return;
-    const poolIdx = Math.floor(Math.random() * pool.length);
+    const buf = new Uint32Array(1);
+    crypto.getRandomValues(buf);
+    const poolIdx = buf[0] % pool.length;
     const incoming = pool[poolIdx];
     const outgoing = tiles[tileIndex];
     const newTiles = [...tiles];
@@ -76,8 +77,7 @@ export function FsPlacementView() {
     const newPool = [...pool.slice(0, poolIdx), outgoing, ...pool.slice(poolIdx + 1)];
     storage.set("deceptionSceneTiles", newTiles);
     storage.set("deceptionTilePool", newPool);
-    storage.set("deceptionFsHasSwappedThisRound", true);
-    // Remove stale marker for the swapped-out tile
+    storage.set("deceptionFsRerolledTiles", [...(storage.get("deceptionFsRerolledTiles") as number[]), tileIndex]);
     storage.get("deceptionMarkers").delete(outgoing.category);
   }, []);
 
@@ -106,7 +106,7 @@ export function FsPlacementView() {
     );
   }
 
-  const canSwap = isFs && !hasSwapped && tilePool.length > 0;
+  const canReroll = (tileIndex: number) => isFs && !rerolledTiles.includes(tileIndex) && tilePool.length > 0;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start bg-background px-4 py-8 overflow-y-auto">
@@ -131,14 +131,11 @@ export function FsPlacementView() {
           {sceneTiles.map((tile, tileIndex) => {
             const isPermanent = PERMANENT_INDICES.has(tileIndex);
             const selectedOption = markers[tile.category] ?? null;
-            const isSwapTarget = swapTarget === tileIndex;
 
             return (
               <div
                 key={tile.category}
-                className={`rounded-xl border bg-muted/30 px-4 py-3 flex flex-col gap-2 transition-colors ${
-                  isSwapTarget ? "border-amber-500/50 bg-amber-500/5" : ""
-                }`}
+                className="rounded-xl border bg-muted/30 px-4 py-3 flex flex-col gap-2"
               >
                 <div className="flex items-center justify-between">
                   <p className="text-xs uppercase tracking-widest text-muted-foreground">
@@ -146,59 +143,42 @@ export function FsPlacementView() {
                     {isPermanent && <span className="ml-1.5 text-muted-foreground/50">·fixed</span>}
                   </p>
                   {isFs && !isPermanent && (
-                    canSwap ? (
+                    rerolledTiles.includes(tileIndex) ? (
+                      <span className="text-[10px] text-muted-foreground/40">rerolled</span>
+                    ) : (
                       <button
-                        onClick={() => setSwapTarget(isSwapTarget ? null : tileIndex)}
-                        className={`text-[10px] px-2 py-0.5 rounded border transition-colors cursor-pointer ${
-                          isSwapTarget
-                            ? "border-amber-500 text-amber-500 bg-amber-500/10"
-                            : "border-border text-muted-foreground hover:border-amber-500/50"
-                        }`}
+                        onClick={() => canReroll(tileIndex) && rerollTile(tileIndex)}
+                        disabled={!canReroll(tileIndex)}
+                        className="text-[10px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-amber-500/50 transition-colors cursor-pointer disabled:cursor-default disabled:opacity-40"
                       >
-                        {isSwapTarget ? "cancel" : "swap"}
+                        reroll
                       </button>
-                    ) : hasSwapped ? (
-                      <span className="text-[10px] text-muted-foreground/40">swapped</span>
-                    ) : null
+                    )
                   )}
                 </div>
 
-                {isSwapTarget ? (
-                  <div className="flex flex-col gap-1.5">
-                    <p className="text-xs text-amber-500/80">Replace this tile with a random new one?</p>
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      className="border-amber-500/50 text-amber-500 hover:bg-amber-500/10 w-full"
-                      onClick={() => { swapTile(tileIndex); setSwapTarget(null); }}
-                    >
-                      Confirm Swap
-                    </Button>
-                  </div>
-                ) : (
-                  <div className="flex flex-wrap gap-1.5">
-                    {tile.options.map((option, optIndex) => {
-                      const isSelected = selectedOption === optIndex;
-                      return (
-                        <button
-                          key={option}
-                          onClick={() => isFs && setMarker(tile.category, optIndex)}
-                          disabled={!isFs}
-                          className={`px-2.5 py-1 rounded-lg border text-xs transition-colors ${
-                            isFs ? "cursor-pointer" : "cursor-default"
-                          } ${
-                            isSelected
-                              ? "border-primary bg-primary/15 text-foreground font-medium"
-                              : "border-border text-muted-foreground hover:border-primary/40"
-                          }`}
-                        >
-                          {option}
-                          {isSelected && <span className="ml-1 text-primary">●</span>}
-                        </button>
-                      );
-                    })}
-                  </div>
-                )}
+                <div className="flex flex-wrap gap-1.5">
+                  {tile.options.map((option, optIndex) => {
+                    const isSelected = selectedOption === optIndex;
+                    return (
+                      <button
+                        key={option}
+                        onClick={() => isFs && setMarker(tile.category, optIndex)}
+                        disabled={!isFs}
+                        className={`px-2.5 py-1 rounded-lg border text-xs transition-colors ${
+                          isFs ? "cursor-pointer" : "cursor-default"
+                        } ${
+                          isSelected
+                            ? "border-primary bg-primary/15 text-foreground font-medium"
+                            : "border-border text-muted-foreground hover:border-primary/40"
+                        }`}
+                      >
+                        {option}
+                        {isSelected && <span className="ml-1 text-primary">●</span>}
+                      </button>
+                    );
+                  })}
+                </div>
               </div>
             );
           })}

@@ -94,7 +94,7 @@ export type Storage = {
   deceptionDiscussionTimerStart: number | null;
   deceptionEnableAccomplice: boolean;
   deceptionTilePool: Array<{ category: string; options: string[] }>;
-  deceptionFsHasSwappedThisRound: boolean;
+  deceptionFsRerolledTiles: number[];  // indices of non-fixed tiles already rerolled
   deceptionEliminatedPlayers: LiveMap<string, boolean>;  // investigators who accused wrongly
 };
 
@@ -143,7 +143,7 @@ export function clearGameData(storage: LiveObject<Storage>) {
   const deceptionAccusations = storage.get("deceptionAccusations");
   for (const k of deceptionAccusations.keys()) deceptionAccusations.delete(k);
   storage.set("deceptionTilePool", []);
-  storage.set("deceptionFsHasSwappedThisRound", false);
+  storage.set("deceptionFsRerolledTiles", []);
   const deceptionEliminatedPlayers = storage.get("deceptionEliminatedPlayers");
   for (const k of deceptionEliminatedPlayers.keys()) deceptionEliminatedPlayers.delete(k);
 }

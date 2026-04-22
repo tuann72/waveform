@@ -374,7 +374,7 @@ export function WaitingRoomView() {
       storage.set("deceptionSceneTiles", data.sceneTiles);
       storage.set("deceptionTilePool", data.tilePool);
       storage.set("deceptionCurrentRound", 1);
-      storage.set("deceptionFsHasSwappedThisRound", false);
+      storage.set("deceptionFsRerolledTiles", []);
       storage.set("deceptionPhase", "role-reveal");
     },
     [],

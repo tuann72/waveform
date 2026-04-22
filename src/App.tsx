@@ -329,7 +329,7 @@ function MultiplayerRoom() {
         deceptionDiscussionTimerStart: null,
         deceptionEnableAccomplice: false,
         deceptionTilePool: [],
-        deceptionFsHasSwappedThisRound: false,
+        deceptionFsRerolledTiles: [],
         deceptionEliminatedPlayers: new LiveMap(),
       }}
     >

@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { useLeaveRoom } from "@/hooks/useLeaveRoom";
 
 export function DeceptionResultsView() {
-  const { mp } = useMultiplayer();
+  const { mp, setDeceptionRole } = useMultiplayer();
   const { goTo } = useGame();
   const { leaving, handleLeave } = useLeaveRoom();
 
@@ -19,7 +19,10 @@ export function DeceptionResultsView() {
 
   // Non-host: navigate to waiting room when host resets via Play Again
   useEffect(() => {
-    if (!mp.isHost && deceptionPhase === null) goTo("waitingRoom");
+    if (!mp.isHost && deceptionPhase === null) {
+      setDeceptionRole(null);
+      goTo("waitingRoom");
+    }
   }, [deceptionPhase, mp.isHost]);
 
   const resetGame = useMutation(({ storage }) => {
@@ -27,6 +30,7 @@ export function DeceptionResultsView() {
   }, []);
 
   function handlePlayAgain() {
+    setDeceptionRole(null);
     resetGame();
     goTo("waitingRoom");
   }

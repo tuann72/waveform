@@ -259,7 +259,6 @@ export function DiscussionView() {
 
   const advanceToNextRound = useMutation(({ storage }) => {
     storage.set("deceptionCurrentRound", (storage.get("deceptionCurrentRound") ?? 1) + 1);
-    storage.set("deceptionFsHasSwappedThisRound", false);
     storage.set("deceptionPhase", "fs-placement");
     storage.set("deceptionFsTimerStart", Date.now());
     storage.set("deceptionDiscussionTimerStart", null);
