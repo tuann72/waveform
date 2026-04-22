@@ -15,7 +15,8 @@ import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { useCountdown } from "@/hooks/useCountdown";
 import { calcPoints, calcPoints2D, applyDoubleDown } from "@/lib/scoring";
-import { playPointSound } from "@/lib/sounds";
+import { playPointSound } from "@/lib/sounds"
+import { DinoGame } from "@/components/game/DinoGame";
 
 type GuessMode =
   | { kind: "classic"; playerDials: Record<string, DialConfig[]> }
@@ -363,9 +364,12 @@ export function MultiGuessBase({ mode }: Props) {
         )}
 
         {amIGuesser && amILocked && !allGuessersLocked && (
-          <div className="flex flex-col items-center gap-2">
-            <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in<Ellipsis /></p>
-            <Button variant="outline" size="sm" onClick={handleUnlockGuess}>Unlock</Button>
+          <div className="flex flex-col gap-2">
+            <div className="flex flex-col items-center gap-2">
+              <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in<Ellipsis /></p>
+              <Button variant="outline" size="sm" onClick={handleUnlockGuess}>Unlock</Button>
+            </div>
+            <DinoGame height={130} />
           </div>
         )}
 
@@ -388,7 +392,10 @@ export function MultiGuessBase({ mode }: Props) {
         )}
 
         {amIAuthor && !allGuessersLocked && (
-          <p className="text-sm text-center text-muted-foreground">Watching guesses come in<Ellipsis /></p>
+          <div className="flex flex-col gap-2">
+            <p className="text-sm text-center text-muted-foreground">Watching guesses come in<Ellipsis /></p>
+            <DinoGame height={130} />
+          </div>
         )}
       </div>
     </div>

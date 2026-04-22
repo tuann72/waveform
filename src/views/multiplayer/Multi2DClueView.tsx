@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Badge } from "@/components/ui/badge"
 import { Separator } from "@/components/ui/separator"
 import { Ellipsis } from "@/components/ui/ellipsis"
+import { DinoGame } from "@/components/game/DinoGame"
 import { spectrumCards } from "@/data/spectrumCards"
 import { cn } from "@/lib/utils"
 
@@ -379,15 +380,18 @@ export function Multi2DClueView() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-3 py-2">
-            <p className="text-center text-sm text-muted-foreground">
-              {timerExpired && !hasSubmitted
-                ? "Time's up! Your clues have been saved."
-                : <>Clues submitted! Waiting for others<Ellipsis /></>}
-            </p>
-            {hasSubmitted && !timerExpired && !allOthersSubmitted && (
-              <Button variant="outline" size="sm" onClick={handleUnlock}>Edit Clues</Button>
-            )}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col items-center gap-3 py-2">
+              <p className="text-center text-sm text-muted-foreground">
+                {timerExpired && !hasSubmitted
+                  ? "Time's up! Your clues have been saved."
+                  : <>Clues submitted! Waiting for others<Ellipsis /></>}
+              </p>
+              {hasSubmitted && !timerExpired && !allOthersSubmitted && (
+                <Button variant="outline" size="sm" onClick={handleUnlock}>Edit Clues</Button>
+              )}
+            </div>
+            <DinoGame />
           </div>
         )}
 

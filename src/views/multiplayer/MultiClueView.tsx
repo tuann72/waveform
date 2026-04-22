@@ -11,6 +11,7 @@ import { Separator } from "@/components/ui/separator";
 import { spectrumCards } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { TimerBar } from "@/components/game/TimerBar";
+import { DinoGame } from "@/components/game/DinoGame";
 import { useCountdown } from "@/hooks/useCountdown";
 
 function shuffle<T>(arr: T[]): T[] {
@@ -57,7 +58,7 @@ export function MultiClueView() {
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [rerollsUsed, setRerollsUsed] = useState(0);
   const savedOnExpiryRef = useRef(false);
-  const maxRerolls = Math.ceil(totalRounds / 2);
+  const maxRerolls = totalRounds;
 
   // Initialize local clues when my dials load
   if (myDials.length > 0 && myDials.length !== cluesInitializedFor) {
@@ -348,17 +349,20 @@ export function MultiClueView() {
             </div>
           </div>
         ) : (
-          <div className="flex flex-col items-center gap-3 py-2">
-            <p className="text-center text-sm text-muted-foreground">
-              {timerExpired && !hasSubmitted
-                ? "Time's up! Your clues have been saved."
-                : <>Clues submitted! Waiting for others<Ellipsis /></>}
-            </p>
-            {hasSubmitted && !timerExpired && !allOthersSubmitted && (
-              <Button variant="outline" size="sm" onClick={handleUnlock}>
-                Edit Clues
-              </Button>
-            )}
+          <div className="flex flex-col gap-3">
+            <div className="flex flex-col items-center gap-3 py-2">
+              <p className="text-center text-sm text-muted-foreground">
+                {timerExpired && !hasSubmitted
+                  ? "Time's up! Your clues have been saved."
+                  : <>Clues submitted! Waiting for others<Ellipsis /></>}
+              </p>
+              {hasSubmitted && !timerExpired && !allOthersSubmitted && (
+                <Button variant="outline" size="sm" onClick={handleUnlock}>
+                  Edit Clues
+                </Button>
+              )}
+            </div>
+            <DinoGame />
           </div>
         )}
 
