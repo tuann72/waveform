@@ -9,7 +9,8 @@ export interface MurdererSolution {
 
 export interface DeceptionRoleBlob {
   role: DeceptionRole;
-  murdererPlayerId?: string; // set for accomplice
+  murdererPlayerId?: string; // set for accomplice and forensic-scientist
+  fsPlayerId?: string;       // set for murderer, so they can encrypt solution for the FS
 }
 
 export interface DeceptionRoleMapBlob {

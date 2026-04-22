@@ -6,8 +6,9 @@ import { deriveKey, decryptJson } from "@/lib/crypto";
 import { useCountdown } from "@/hooks/useCountdown";
 import { TimerBar } from "@/components/game/TimerBar";
 import { Button } from "@/components/ui/button";
+import { Separator } from "@/components/ui/separator";
 import { Ellipsis } from "@/components/ui/ellipsis";
-import type { DeceptionRoleBlob } from "@/types/deception";
+import type { DeceptionRoleBlob, MurdererSolution } from "@/types/deception";
 
 const PERMANENT_INDICES = new Set([0, 1]); // Location, Cause of Death
 
@@ -28,9 +29,15 @@ export function FsPlacementView() {
   const encryptedRoles = useStorage((s) =>
     s ? (s.deceptionEncryptedRoles as Record<string, string>) : {}
   ) ?? {};
+  const encryptedSolutionForFs = useStorage((s) => s?.deceptionEncryptedSolutionForFs ?? null);
+  const dealtCards = useStorage((s) =>
+    s ? (s.deceptionDealtCards as Record<string, { meansCards: string[]; evidenceCards: string[] }>) : {}
+  ) ?? {};
+  const players = useStorage((s) => (s ? Object.entries(s.players) : [])) ?? [];
   const phase = useStorage((s) => s?.deceptionPhase);
 
   const [myRole, setMyRole] = useState<DeceptionRoleBlob | null>(null);
+  const [fsSolution, setFsSolution] = useState<MurdererSolution | null>(null);
   const [swapTarget, setSwapTarget] = useState<number | null>(null);
 
   const timeLeft = useCountdown(fsTimerStart, fsTimerDuration, 500);
@@ -44,6 +51,14 @@ export function FsPlacementView() {
       .then((data) => setMyRole(data as DeceptionRoleBlob))
       .catch(() => {});
   }, [encryptedRoles[mp.playerId]]);
+
+  useEffect(() => {
+    if (!encryptedSolutionForFs || fsSolution) return;
+    deriveKey(mp.roomCode, mp.playerId)
+      .then((key) => decryptJson(encryptedSolutionForFs, key))
+      .then((data) => setFsSolution(data as MurdererSolution))
+      .catch(() => {});
+  }, [encryptedSolutionForFs]);
 
   const setMarker = useMutation(({ storage }, category: string, optionIndex: number) => {
     storage.get("deceptionMarkers").set(category, optionIndex);
@@ -69,6 +84,7 @@ export function FsPlacementView() {
   const advanceToDiscussion = useMutation(({ storage }) => {
     storage.set("deceptionPhase", "discussion");
     storage.set("deceptionFsTimerStart", null);
+    storage.set("deceptionDiscussionTimerStart", Date.now());
   }, []);
 
   // Timer expiry: host advances
@@ -193,6 +209,53 @@ export function FsPlacementView() {
             Done — Start Discussion
           </Button>
         )}
+
+        {/* FS card reference */}
+        {isFs && (
+          <>
+            <Separator />
+            <div className="flex flex-col gap-3">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Players' Cards</p>
+              {fsSolution && (
+                <div className="rounded-lg border border-red-400/30 bg-red-400/5 px-4 py-2.5 text-sm">
+                  <p className="text-[10px] uppercase tracking-widest text-red-400/70 mb-1">Murder weapon &amp; key evidence</p>
+                  <p className="font-medium text-red-400">{fsSolution.meansCard} · {fsSolution.evidenceCard}</p>
+                </div>
+              )}
+              {players.map(([id, info]) => {
+                const hand = dealtCards[id];
+                if (!hand) return null;
+                const isMurderer = myRole?.murdererPlayerId === id;
+                return (
+                  <div key={id} className={`rounded-xl border px-4 py-3 flex flex-col gap-2 ${isMurderer ? "border-red-400/40 bg-red-400/5" : "bg-muted/20"}`}>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
+                      <span className="text-sm font-medium text-foreground">
+                        {info.name}{id === mp.playerId ? " (you)" : ""}
+                      </span>
+                      {isMurderer && <span className="ml-auto text-[10px] text-red-400 uppercase tracking-wide">murderer</span>}
+                    </div>
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <div>
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Means</p>
+                        {hand.meansCards.map((c) => (
+                          <p key={c} className={`text-xs ${fsSolution?.meansCard === c ? "text-red-400 font-semibold" : "text-foreground"}`}>{c}</p>
+                        ))}
+                      </div>
+                      <div>
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Evidence</p>
+                        {hand.evidenceCards.map((c) => (
+                          <p key={c} className={`text-xs ${fsSolution?.evidenceCard === c ? "text-red-400 font-semibold" : "text-foreground"}`}>{c}</p>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
+            </div>
+          </>
+        )}
+
         {!isFs && (
           <p className="text-sm text-center text-muted-foreground">
             Waiting for the Forensic Scientist<Ellipsis />

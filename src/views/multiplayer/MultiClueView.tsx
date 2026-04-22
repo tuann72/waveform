@@ -55,8 +55,9 @@ export function MultiClueView() {
   const [currentDial, setCurrentDial] = useState(0);
   const [cluesInitializedFor, setCluesInitializedFor] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
-  const [hasRerolled, setHasRerolled] = useState(false);
+  const [rerollsUsed, setRerollsUsed] = useState(0);
   const savedOnExpiryRef = useRef(false);
+  const maxRerolls = Math.ceil(totalRounds / 2);
 
   // Initialize local clues when my dials load
   if (myDials.length > 0 && myDials.length !== cluesInitializedFor) {
@@ -199,7 +200,7 @@ export function MultiClueView() {
     const next = [...clues];
     next[currentDial] = "";
     setClues(next);
-    setHasRerolled(true);
+    setRerollsUsed((n) => n + 1);
     rerollDial(mp.playerId, currentDial, selectedCategories);
   }
 
@@ -288,11 +289,13 @@ export function MultiClueView() {
             <Button
               variant="outline"
               size="sm"
-              disabled={hasRerolled}
+              disabled={rerollsUsed >= maxRerolls}
               onClick={handleReroll}
               className="text-xs"
             >
-              {hasRerolled ? "Rerolled" : "Reroll Card"}
+              {rerollsUsed >= maxRerolls
+                ? "No Rerolls Left"
+                : `Reroll Card (${maxRerolls - rerollsUsed} left)`}
             </Button>
           </div>
         )}

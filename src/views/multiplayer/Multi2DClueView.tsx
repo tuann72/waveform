@@ -72,8 +72,9 @@ export function Multi2DClueView() {
   const [currentDial, setCurrentDial] = useState(0)
   const [cluesInitializedFor, setCluesInitializedFor] = useState(0)
   const [hasSubmitted, setHasSubmitted] = useState(false)
-  const [hasRerolled, setHasRerolled] = useState(false)
+  const [rerollsUsed, setRerollsUsed] = useState(0)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
+  const maxRerolls = Math.ceil(totalRounds / 2)
   const savedOnExpiryRef = useRef(false)
 
   if (myDials.length > 0 && myDials.length !== cluesInitializedFor) {
@@ -203,7 +204,7 @@ export function Multi2DClueView() {
     const next = [...clues]
     next[currentDial] = ""
     setClues(next)
-    setHasRerolled(true)
+    setRerollsUsed(n => n + 1)
     rerollDial2D(mp.playerId, currentDial, selectedCategories)
   }
 
@@ -300,8 +301,10 @@ export function Multi2DClueView() {
         {/* Reroll button */}
         {!myCluesSubmitted && (
           <div className="flex justify-end">
-            <Button variant="outline" size="sm" disabled={hasRerolled} onClick={handleReroll} className="text-xs">
-              {hasRerolled ? "Rerolled" : "Reroll Both Axes"}
+            <Button variant="outline" size="sm" disabled={rerollsUsed >= maxRerolls} onClick={handleReroll} className="text-xs">
+              {rerollsUsed >= maxRerolls
+                ? "No Rerolls Left"
+                : `Reroll Both Axes (${maxRerolls - rerollsUsed} left)`}
             </Button>
           </div>
         )}

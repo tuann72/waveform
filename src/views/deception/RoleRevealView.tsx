@@ -7,7 +7,7 @@ import { PlayerStatusList, DoneNode, WaitingNode } from "@/components/game/Playe
 import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { useLeaveRoom } from "@/hooks/useLeaveRoom";
-import type { DeceptionRole, DeceptionRoleBlob } from "@/types/deception";
+import type { DeceptionRole, DeceptionRoleBlob, MurdererSolution } from "@/types/deception";
 
 const ROLE_INFO: Record<DeceptionRole, { label: string; description: string; color: string }> = {
   "forensic-scientist": {
@@ -37,7 +37,7 @@ const ROLE_INFO: Record<DeceptionRole, { label: string; description: string; col
 };
 
 export function RoleRevealView() {
-  const { mp } = useMultiplayer();
+  const { mp, setDeceptionRole } = useMultiplayer();
   const { goTo } = useGame();
   const { leaving, handleLeave } = useLeaveRoom();
 
@@ -52,6 +52,7 @@ export function RoleRevealView() {
     s ? (s.deceptionRoleAcknowledged as Record<string, boolean>) : {}
   ) ?? {};
   const encryptedSolution = useStorage((s) => s?.deceptionEncryptedSolutionForHost ?? null);
+  const encryptedSolutionForFs = useStorage((s) => s?.deceptionEncryptedSolutionForFs ?? null);
   const hostId = useStorage((s) => s?.hostId ?? "") ?? "";
 
   const [myRole, setMyRole] = useState<DeceptionRoleBlob | null>(null);
@@ -59,6 +60,7 @@ export function RoleRevealView() {
   const [selectedMeans, setSelectedMeans] = useState<string | null>(null);
   const [selectedEvidence, setSelectedEvidence] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
+  const [fsSolution, setFsSolution] = useState<MurdererSolution | null>(null);
 
   const myHand = dealtCards[mp.playerId];
   const alreadyAcknowledged = acknowledged[mp.playerId] === true;
@@ -69,16 +71,30 @@ export function RoleRevealView() {
     if (!blob) return;
     deriveKey(mp.roomCode, mp.playerId)
       .then((key) => decryptJson(blob, key))
-      .then((data) => setMyRole(data as DeceptionRoleBlob))
+      .then((data) => {
+        const blob = data as DeceptionRoleBlob;
+        setMyRole(blob);
+        setDeceptionRole(blob.role);
+      })
       .catch(() => setDecryptError(true));
   }, [encryptedRoles[mp.playerId]]);
+
+  // FS: decrypt own solution once it's written by the murderer
+  useEffect(() => {
+    if (myRole?.role !== "forensic-scientist" || !encryptedSolutionForFs || fsSolution) return;
+    deriveKey(mp.roomCode, mp.playerId)
+      .then((key) => decryptJson(encryptedSolutionForFs, key))
+      .then((data) => setFsSolution(data as MurdererSolution))
+      .catch(() => {});
+  }, [encryptedSolutionForFs, myRole?.role]);
 
   const writeAcknowledged = useMutation(({ storage }, playerId: string) => {
     storage.get("deceptionRoleAcknowledged").set(playerId, true);
   }, []);
 
-  const writeSolutionForHost = useMutation(({ storage }, blob: string) => {
-    storage.set("deceptionEncryptedSolutionForHost", blob);
+  const writeSolutionForHost = useMutation(({ storage }, hostBlob: string, fsBlob: string) => {
+    storage.set("deceptionEncryptedSolutionForHost", hostBlob);
+    storage.set("deceptionEncryptedSolutionForFs", fsBlob);
   }, []);
 
   const advanceToFsPlacement = useMutation(({ storage }) => {
@@ -104,12 +120,15 @@ export function RoleRevealView() {
   }, [phase]);
 
   async function handleConfirmMurderer() {
-    if (!selectedMeans || !selectedEvidence) return;
+    if (!selectedMeans || !selectedEvidence || !myRole?.fsPlayerId) return;
     setSubmitting(true);
     try {
+      const solution = { meansCard: selectedMeans, evidenceCard: selectedEvidence };
       const hostKey = await deriveKey(mp.roomCode, hostId);
-      const blob = await encryptJson({ meansCard: selectedMeans, evidenceCard: selectedEvidence }, hostKey);
-      writeSolutionForHost(blob);
+      const hostBlob = await encryptJson(solution, hostKey);
+      const fsKey = await deriveKey(mp.roomCode, myRole.fsPlayerId);
+      const fsBlob = await encryptJson(solution, fsKey);
+      writeSolutionForHost(hostBlob, fsBlob);
       writeAcknowledged(mp.playerId);
     } finally {
       setSubmitting(false);
@@ -155,15 +174,61 @@ export function RoleRevealView() {
 
         <div className="rounded-xl border bg-muted/40 px-5 py-4 text-sm text-muted-foreground leading-relaxed">
           {info.description}
-          {myRole.role === "accomplice" && myRole.murdererPlayerId && (
+          {(myRole.role === "accomplice" || myRole.role === "forensic-scientist") && myRole.murdererPlayerId && (
             <p className="mt-3 text-foreground font-medium">
               The murderer is:{" "}
-              <span className="text-orange-400">
+              <span className={myRole.role === "forensic-scientist" ? "text-blue-400" : "text-orange-400"}>
                 {playerMap[myRole.murdererPlayerId]?.name ?? "Unknown"}
               </span>
             </p>
           )}
         </div>
+
+        {/* FS: see all players' cards and murderer's selected solution */}
+        {myRole.role === "forensic-scientist" && (
+          <div className="flex flex-col gap-3">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">All Players' Cards</p>
+            {players.map(([id, info]) => {
+              const hand = dealtCards[id];
+              if (!hand) return null;
+              const isMurderer = id === myRole.murdererPlayerId;
+              return (
+                <div key={id} className={`rounded-xl border px-4 py-3 flex flex-col gap-2 ${isMurderer ? "border-red-400/40 bg-red-400/5" : "bg-muted/20"}`}>
+                  <div className="flex items-center gap-2">
+                    <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
+                    <span className="text-sm font-medium text-foreground">
+                      {info.name}{id === mp.playerId ? " (you)" : ""}
+                    </span>
+                    {isMurderer && <span className="ml-auto text-[10px] text-red-400 uppercase tracking-wide">murderer</span>}
+                  </div>
+                  <div className="grid grid-cols-2 gap-1.5">
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Means</p>
+                      {hand.meansCards.map((c) => (
+                        <p key={c} className={`text-xs ${fsSolution?.meansCard === c ? "text-red-400 font-semibold" : "text-foreground"}`}>{c}</p>
+                      ))}
+                    </div>
+                    <div>
+                      <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Evidence</p>
+                      {hand.evidenceCards.map((c) => (
+                        <p key={c} className={`text-xs ${fsSolution?.evidenceCard === c ? "text-red-400 font-semibold" : "text-foreground"}`}>{c}</p>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              );
+            })}
+            {!fsSolution && (
+              <p className="text-xs text-muted-foreground text-center">Waiting for murderer to select their weapon<Ellipsis /></p>
+            )}
+            {fsSolution && (
+              <div className="rounded-lg border border-red-400/30 bg-red-400/5 px-4 py-2.5 text-sm">
+                <p className="text-[10px] uppercase tracking-widest text-red-400/70 mb-1">Murder weapon &amp; key evidence</p>
+                <p className="font-medium text-red-400">{fsSolution.meansCard} · {fsSolution.evidenceCard}</p>
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Murderer: pick solution cards */}
         {myRole.role === "murderer" && !alreadyAcknowledged && myHand && (

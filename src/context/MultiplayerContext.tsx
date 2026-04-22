@@ -1,4 +1,5 @@
 import { createContext, useContext, useState, useEffect, type ReactNode } from "react";
+import type { DeceptionRole } from "@/types/deception";
 
 export const SESSION_KEY = "waveform_session";
 
@@ -28,6 +29,7 @@ interface SessionData {
   roomCode: string;
   isHost: boolean;
   pendingSlots: number[];
+  deceptionRole: DeceptionRole | null;
 }
 
 function loadSession(): SessionData {
@@ -42,6 +44,7 @@ function loadSession(): SessionData {
           roomCode: parsed.roomCode ?? "",
           isHost: parsed.isHost ?? false,
           pendingSlots: Array.isArray(parsed.pendingSlots) ? parsed.pendingSlots : [],
+          deceptionRole: (parsed.deceptionRole as DeceptionRole | null | undefined) ?? null,
         };
       }
     }
@@ -52,6 +55,7 @@ function loadSession(): SessionData {
     roomCode: "",
     isHost: false,
     pendingSlots: [],
+    deceptionRole: null,
   };
 }
 
@@ -61,6 +65,7 @@ export interface MultiplayerState {
   playerId: string;
   isHost: boolean;
   pendingSlots: number[]; // remaining slots to try if current is taken (host only)
+  deceptionRole: DeceptionRole | null;
 }
 
 interface MultiplayerContextValue {
@@ -71,6 +76,7 @@ interface MultiplayerContextValue {
   clearRoom: () => void;
   setIsHost: (v: boolean) => void;
   tryNextSlot: () => boolean;
+  setDeceptionRole: (role: DeceptionRole | null) => void;
 }
 
 const MultiplayerContext = createContext<MultiplayerContextValue | null>(null);
@@ -86,6 +92,7 @@ export function MultiplayerProvider({ children }: { children: ReactNode }) {
         roomCode: mp.roomCode,
         isHost: mp.isHost,
         pendingSlots: mp.pendingSlots,
+        deceptionRole: mp.deceptionRole,
       }));
     } catch {}
   }, [mp]);
@@ -115,6 +122,7 @@ export function MultiplayerProvider({ children }: { children: ReactNode }) {
           setMp((s) => ({ ...s, roomCode: "", isHost: false, pendingSlots: [] }));
         },
         setIsHost: (isHost) => setMp((s) => ({ ...s, isHost })),
+        setDeceptionRole: (deceptionRole) => setMp((s) => ({ ...s, deceptionRole })),
         tryNextSlot: () => {
           const nextSlot = mp.pendingSlots[0];
           if (nextSlot === undefined) return false;

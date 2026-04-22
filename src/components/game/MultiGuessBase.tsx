@@ -15,6 +15,7 @@ import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { useCountdown } from "@/hooks/useCountdown";
 import { calcPoints, calcPoints2D, applyDoubleDown } from "@/lib/scoring";
+import { playPointSound } from "@/lib/sounds";
 
 type GuessMode =
   | { kind: "classic"; playerDials: Record<string, DialConfig[]> }
@@ -70,6 +71,13 @@ export function MultiGuessBase({ mode }: Props) {
       ? (mode.playerDials[currentEntry.authorId]?.[currentEntry.dialIndex] ?? null)
       : (mode.player2DDials[currentEntry.authorId]?.[currentEntry.dialIndex] ?? null)
     : null;
+
+  const removeGuess = useMutation(
+    ({ storage }, guesserId: string, dialIndex: number, authorId: string) => {
+      storage.get("guessResults").delete(`${guesserId}-${dialIndex}-${authorId}`);
+    },
+    [],
+  );
 
   const recordGuess = useMutation(
     ({ storage }, guesserId: string, dialIndex: number, authorId: string, pos: { x: number; y: number }, points: number, dd: boolean) => {
@@ -129,9 +137,29 @@ export function MultiGuessBase({ mode }: Props) {
     return () => { document.body.style.overflow = ""; };
   }, []);
 
-  // 12s auto-advance after all guessers lock in
+  const timerExpired = guessTimerDuration > 0 && timeLeft === 0;
+
+  // Play point sound when results are revealed for this round
   useEffect(() => {
-    if (!allGuessersLocked) return;
+    if (!allGuessersLocked || !amIGuesser || !currentEntry) return;
+    const result = guessResults[`${mp.playerId}-${currentEntry.dialIndex}-${currentEntry.authorId}`];
+    if (result) playPointSound(result.points);
+  }, [allGuessersLocked, currentGuessIndex]);
+
+  // Host advances 1.5s after timer expires (gives all clients time to write their auto-lock)
+  useEffect(() => {
+    if (!timerExpired || !mp.isHost || isAdvancing.current) return;
+    const timeout = setTimeout(() => {
+      if (isAdvancing.current) return;
+      isAdvancing.current = true;
+      advanceGuess();
+    }, 1500);
+    return () => clearTimeout(timeout);
+  }, [timerExpired, currentGuessIndex]);
+
+  // 12s auto-advance after all guessers lock in (only when timer hasn't expired)
+  useEffect(() => {
+    if (!allGuessersLocked || timerExpired) return;
     const startTime = Date.now();
     const interval = setInterval(() => {
       setAutoAdvanceTimer(Math.max(0, 12 - Math.floor((Date.now() - startTime) / 1000)));
@@ -160,6 +188,11 @@ export function MultiGuessBase({ mode }: Props) {
       ? calcPoints(position.x, (authorDial as DialConfig).targetPosition)
       : calcPoints2D(position.x, position.y, (authorDial as Dial2DConfig).targetX, (authorDial as Dial2DConfig).targetY);
     recordGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId, position, applyDoubleDown(raw, doubleDown), doubleDown);
+  }
+
+  function handleUnlockGuess() {
+    if (!currentEntry) return;
+    removeGuess(mp.playerId, currentEntry.dialIndex, currentEntry.authorId);
   }
 
   function handleAdvance() {
@@ -330,7 +363,10 @@ export function MultiGuessBase({ mode }: Props) {
         )}
 
         {amIGuesser && amILocked && !allGuessersLocked && (
-          <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in<Ellipsis /></p>
+          <div className="flex flex-col items-center gap-2">
+            <p className="text-sm text-center text-muted-foreground">Waiting for others to lock in<Ellipsis /></p>
+            <Button variant="outline" size="sm" onClick={handleUnlockGuess}>Unlock</Button>
+          </div>
         )}
 
         {allGuessersLocked && amIAuthor && (

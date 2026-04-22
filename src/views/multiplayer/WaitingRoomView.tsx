@@ -166,6 +166,23 @@ const TIMER_OPTIONS = [
   { value: 0, label: "No limit", label2x: "No limit" },
 ];
 
+const FS_TIMER_OPTIONS = [
+  { value: 60, label: "1 min" },
+  { value: 120, label: "2 min" },
+  { value: 180, label: "3 min" },
+  { value: 240, label: "4 min" },
+  { value: 300, label: "5 min" },
+  { value: 0, label: "No limit" },
+];
+
+const DISCUSSION_TIMER_OPTIONS = [
+  { value: 300, label: "5 min" },
+  { value: 600, label: "10 min" },
+  { value: 900, label: "15 min" },
+  { value: 1200, label: "20 min" },
+  { value: 0, label: "No limit" },
+];
+
 const PLAYER_COLORS = [
   "#f87171", "#fb923c", "#facc15", "#4ade80",
   "#22d3ee", "#60a5fa", "#a78bfa", "#e879f9",
@@ -190,6 +207,7 @@ export function WaitingRoomView() {
   const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
   const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName;
   const deceptionFsTimerDuration = useStorage((s) => s?.deceptionFsTimerDuration ?? 120) ?? 120;
+  const deceptionDiscussionTimerDuration = useStorage((s) => s?.deceptionDiscussionTimerDuration ?? 600) ?? 600;
   const enableAccomplice = useStorage((s) => s?.deceptionEnableAccomplice ?? false) ?? false;
 
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
@@ -207,8 +225,17 @@ export function WaitingRoomView() {
     const players = storage.get("players");
     // Already registered — reconnecting mid-game or returning after play again; leave state intact
     if (players.has(id)) return;
-    // New host or stale room from a previous session — full reset
+    // New host or stale room from a previous session — full reset including lobby settings
     clearGameData(storage);
+    storage.set("gameMode", "classic");
+    storage.set("totalRounds", 3);
+    storage.set("clueTimerDuration", 90);
+    storage.set("guessTimerDuration", 90);
+    storage.set("selectedCategories", []);
+    storage.set("colorPaletteName", "base");
+    storage.set("deceptionFsTimerDuration", 120);
+    storage.set("deceptionDiscussionTimerDuration", 600);
+    storage.set("deceptionEnableAccomplice", false);
     for (const k of players.keys()) players.delete(k);
     players.set(id, { name, isHost: true, color: PLAYER_COLORS[0] });
     storage.set("hostId", id);
@@ -270,9 +297,13 @@ export function WaitingRoomView() {
 
   const setGameMode = useMutation(({ storage }, mode: GameMode) => {
     storage.set("gameMode", mode);
-    const defaultTimer = mode === "2d" ? 60 : 90;
-    storage.set("clueTimerDuration", defaultTimer);
-    storage.set("guessTimerDuration", defaultTimer);
+    if (mode === "deception") {
+      storage.set("totalRounds", 1);
+    } else {
+      const defaultTimer = mode === "2d" ? 60 : 90;
+      storage.set("clueTimerDuration", defaultTimer);
+      storage.set("guessTimerDuration", defaultTimer);
+    }
   }, []);
 
   const setClueTimer = useMutation(({ storage }, duration: number) => {
@@ -312,6 +343,10 @@ export function WaitingRoomView() {
     storage.set("deceptionFsTimerDuration", duration);
   }, []);
 
+  const setDeceptionDiscussionTimer = useMutation(({ storage }, duration: number) => {
+    storage.set("deceptionDiscussionTimerDuration", duration);
+  }, []);
+
   const setDeceptionAccomplice = useMutation(({ storage }, enabled: boolean) => {
     storage.set("deceptionEnableAccomplice", enabled);
   }, []);
@@ -328,10 +363,12 @@ export function WaitingRoomView() {
       dealtCards: Record<string, { meansCards: string[]; evidenceCards: string[] }>;
       sceneTiles: Array<{ category: string; options: string[] }>;
       tilePool: Array<{ category: string; options: string[] }>;
+      fsPlayerId: string;
     }) => {
       const roles = storage.get("deceptionEncryptedRoles");
       for (const [id, blob] of Object.entries(data.encryptedRoles)) roles.set(id, blob);
       storage.set("deceptionEncryptedRoleMapForHost", data.encryptedRoleMapForHost);
+      storage.set("deceptionFsPlayerId", data.fsPlayerId);
       const cards = storage.get("deceptionDealtCards");
       for (const [id, hand] of Object.entries(data.dealtCards)) cards.set(id, hand);
       storage.set("deceptionSceneTiles", data.sceneTiles);
@@ -348,7 +385,8 @@ export function WaitingRoomView() {
     try {
       const playerIds = players.map(([id]) => id);
       const roleMap: DeceptionRoleMapBlob = assignRoles(playerIds, enableAccomplice);
-      const dealtCards = dealCards(playerIds);
+      const fsPlayerId = Object.entries(roleMap.roles).find(([, r]) => r === "forensic-scientist")?.[0] ?? "";
+      const dealtCards = dealCards(playerIds.filter((id) => id !== fsPlayerId));
       const { tiles: sceneTiles, pool: tilePool } = drawSceneTiles();
 
       // Encrypt per-player role blobs
@@ -358,6 +396,8 @@ export function WaitingRoomView() {
         const blob = {
           role,
           ...(role === "accomplice" ? { murdererPlayerId: roleMap.murdererPlayerId } : {}),
+          ...(role === "forensic-scientist" ? { murdererPlayerId: roleMap.murdererPlayerId } : {}),
+          ...(role === "murderer" ? { fsPlayerId } : {}),
         };
         encryptedRoles[playerId] = await encryptJson(blob, key);
       }
@@ -366,7 +406,7 @@ export function WaitingRoomView() {
       const hostKey = await deriveKey(mp.roomCode, mp.playerId);
       const encryptedRoleMapForHost = await encryptJson(roleMap, hostKey);
 
-      startDeceptionGame({ encryptedRoles, encryptedRoleMapForHost, dealtCards, sceneTiles, tilePool });
+      startDeceptionGame({ encryptedRoles, encryptedRoleMapForHost, dealtCards, sceneTiles, tilePool, fsPlayerId });
       goTo("deceptionRoleReveal");
     } finally {
       setStartingDeception(false);
@@ -518,12 +558,12 @@ export function WaitingRoomView() {
           </motion.div>
         )}
 
-        {/* Rounds + Clue Timer */}
+        {/* Rounds + Timers */}
         <motion.div variants={item} className="grid grid-cols-2 gap-3">
           <div className="flex flex-col gap-1.5">
             <Label className="text-xs text-muted-foreground">Rounds</Label>
             <Select
-              value={String(totalRounds ?? 3)}
+              value={String(totalRounds ?? (gameMode === "deception" ? 1 : 3))}
               onValueChange={(v) => setRounds(Number(v))}
               disabled={!mp.isHost}
             >
@@ -531,63 +571,71 @@ export function WaitingRoomView() {
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {ROUND_OPTIONS.map((n) => (
+                {(gameMode === "deception" ? [1, 2, 3] : ROUND_OPTIONS).map((n) => (
                   <SelectItem key={n} value={String(n)}>{n}</SelectItem>
                 ))}
               </SelectContent>
             </Select>
           </div>
           <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Clue Timer</Label>
+            <Label className="text-xs text-muted-foreground">
+              {gameMode === "deception" ? "FS Timer" : "Clue Timer"}
+            </Label>
             <Select
-              value={String(clueTimerDuration ?? 90)}
-              onValueChange={(v) => setClueTimer(Number(v))}
+              value={gameMode === "deception" ? String(deceptionFsTimerDuration) : String(clueTimerDuration ?? 90)}
+              onValueChange={(v) => gameMode === "deception" ? setDeceptionFsTimer(Number(v)) : setClueTimer(Number(v))}
               disabled={!mp.isHost}
             >
               <SelectTrigger className="w-full">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                {TIMER_OPTIONS.map(({ value, label, label2x }) => (
-                  <SelectItem key={value} value={String(value)}>{gameMode === "2d" ? label2x : label}</SelectItem>
-                ))}
+                {gameMode === "deception"
+                  ? FS_TIMER_OPTIONS.map(({ value, label }) => (
+                      <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+                    ))
+                  : TIMER_OPTIONS.map(({ value, label, label2x }) => (
+                      <SelectItem key={value} value={String(value)}>{gameMode === "2d" ? label2x : label}</SelectItem>
+                    ))}
               </SelectContent>
             </Select>
           </div>
-          <div className="flex flex-col gap-1.5">
-            <Label className="text-xs text-muted-foreground">Guess Timer</Label>
-            <Select
-              value={String(guessTimerDuration ?? 90)}
-              onValueChange={(v) => setGuessTimer(Number(v))}
-              disabled={!mp.isHost}
-            >
-              <SelectTrigger className="w-full">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {TIMER_OPTIONS.map(({ value, label, label2x }) => (
-                  <SelectItem key={value} value={String(value)}>{gameMode === "2d" ? label2x : label}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
-        </motion.div>
-
-        {/* Deception-specific settings */}
-        {gameMode === "deception" && (
-          <motion.div variants={item} className="flex flex-col gap-3">
+          {gameMode !== "deception" && (
             <div className="flex flex-col gap-1.5">
-              <Label className="text-xs text-muted-foreground">FS Placement Timer</Label>
+              <Label className="text-xs text-muted-foreground">Guess Timer</Label>
               <Select
-                value={String(deceptionFsTimerDuration)}
-                onValueChange={(v) => setDeceptionFsTimer(Number(v))}
+                value={String(guessTimerDuration ?? 90)}
+                onValueChange={(v) => setGuessTimer(Number(v))}
                 disabled={!mp.isHost}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  {TIMER_OPTIONS.map(({ value, label }) => (
+                  {TIMER_OPTIONS.map(({ value, label, label2x }) => (
+                    <SelectItem key={value} value={String(value)}>{gameMode === "2d" ? label2x : label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
+        </motion.div>
+
+        {/* Deception-specific settings */}
+        {gameMode === "deception" && (
+          <motion.div variants={item} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">Discussion Timer</Label>
+              <Select
+                value={String(deceptionDiscussionTimerDuration)}
+                onValueChange={(v) => setDeceptionDiscussionTimer(Number(v))}
+                disabled={!mp.isHost}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {DISCUSSION_TIMER_OPTIONS.map(({ value, label }) => (
                     <SelectItem key={value} value={String(value)}>{label}</SelectItem>
                   ))}
                 </SelectContent>
@@ -700,19 +748,24 @@ export function WaitingRoomView() {
               </div>
               {id === mp.playerId && colorPickerOpen && (
                 <div className="flex flex-wrap gap-1.5 pb-2 pl-4">
-                  {PLAYER_COLORS.map((color) => (
-                    <button
-                      key={color}
-                      onClick={() => { updatePlayerColor(mp.playerId, color); setColorPickerOpen(false); }}
-                      className="w-5 h-5 rounded-full cursor-pointer hover:scale-125 transition-transform flex-shrink-0"
-                      style={{
-                        background: color,
-                        outline: info.color === color ? "2px solid white" : undefined,
-                        outlineOffset: "1px",
-                      }}
-                      aria-label={color}
-                    />
-                  ))}
+                  {PLAYER_COLORS.map((color) => {
+                    const takenByOther = players.some(([pid, pinfo]) => pid !== mp.playerId && pinfo.color === color);
+                    const isSelected = info.color === color;
+                    return (
+                      <button
+                        key={color}
+                        onClick={() => { if (!takenByOther) { updatePlayerColor(mp.playerId, color); setColorPickerOpen(false); } }}
+                        disabled={takenByOther}
+                        className={`w-5 h-5 rounded-full flex-shrink-0 transition-transform ${takenByOther ? "opacity-25 cursor-not-allowed" : "cursor-pointer hover:scale-125"}`}
+                        style={{
+                          background: color,
+                          outline: isSelected ? "2px solid white" : undefined,
+                          outlineOffset: "1px",
+                        }}
+                        aria-label={color}
+                      />
+                    );
+                  })}
                 </div>
               )}
             </div>

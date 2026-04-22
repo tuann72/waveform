@@ -1,12 +1,131 @@
 import { useEffect, useRef, useState } from "react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
+import { GripVertical } from "lucide-react";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useGame } from "@/context/GameContext";
 import { useStorage, useMutation } from "@/lib/liveblocks";
+import { useCountdown } from "@/hooks/useCountdown";
+import { TimerBar } from "@/components/game/TimerBar";
 import { deriveKey, decryptJson } from "@/lib/crypto";
 import { PlayerStatusList, DoneNode, WaitingNode } from "@/components/game/PlayerStatusList";
 import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import type { MurdererSolution } from "@/types/deception";
+
+type ViewMode = "marker" | "accusation";
+
+// ── Sortable player card wrapper ─────────────────────────────────────────────
+
+interface SortableCardProps {
+  id: string;
+  children: (dragHandleProps: React.HTMLAttributes<HTMLElement>, isDragging: boolean) => React.ReactNode;
+  disabled?: boolean;
+}
+
+function SortableCard({ id, children, disabled }: SortableCardProps) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } =
+    useSortable({ id, disabled });
+
+  const style: React.CSSProperties = {
+    transform: CSS.Transform.toString(transform),
+    transition,
+    zIndex: isDragging ? 10 : undefined,
+    opacity: isDragging ? 0.85 : 1,
+  };
+
+  return (
+    <div ref={setNodeRef} style={style}>
+      {children({ ...attributes, ...listeners }, isDragging)}
+    </div>
+  );
+}
+
+// ── CardWord: click to hide, hover to peek, click again to unhide ────────────
+
+interface CardWordProps {
+  text: string;
+  hidden: boolean;
+  onToggle: () => void;
+  selectable?: boolean;
+  selected?: boolean;
+  onSelect?: () => void;
+  mode: ViewMode;
+}
+
+function CardWord({ text, hidden, onToggle, selectable, selected, onSelect, mode }: CardWordProps) {
+  const [hovered, setHovered] = useState(false);
+
+  if (mode === "marker") {
+    const revealed = !hidden || hovered;
+    return (
+      <button
+        onClick={onToggle}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className={`px-2.5 py-1 rounded-lg border text-xs transition-all cursor-pointer select-none ${
+          hidden && !hovered
+            ? "border-border bg-muted/60 text-transparent tracking-widest"
+            : hidden && hovered
+              ? "border-primary/30 bg-muted/30 text-foreground/70 italic"
+              : "border-border bg-muted/20 text-foreground hover:border-muted-foreground/40"
+        }`}
+        title={hidden ? "Click to unhide" : "Click to hide"}
+      >
+        {revealed ? text : "██████"}
+      </button>
+    );
+  }
+
+  // accusation mode
+  const revealed = !hidden || hovered;
+
+  if (!selectable) {
+    return (
+      <span
+        onMouseEnter={() => hidden && setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
+        className={`px-2.5 py-1 rounded-lg border border-border/40 bg-muted/10 text-xs cursor-default select-none ${
+          hidden && !hovered ? "text-transparent tracking-widest" : "text-muted-foreground/50"
+        }`}
+      >
+        {revealed ? text : "██████"}
+      </span>
+    );
+  }
+
+  return (
+    <button
+      onClick={onSelect}
+      onMouseEnter={() => setHovered(true)}
+      onMouseLeave={() => setHovered(false)}
+      className={`px-2.5 py-1 rounded-lg border text-xs transition-colors cursor-pointer select-none ${
+        selected
+          ? "border-primary bg-primary/15 text-foreground font-medium ring-1 ring-primary/30"
+          : hidden && !hovered
+            ? "border-border bg-muted/60 text-transparent tracking-widest hover:border-primary/40"
+            : "border-border bg-muted/20 text-foreground hover:border-primary/40 hover:bg-primary/5"
+      }`}
+    >
+      {revealed ? text : "██████"}
+    </button>
+  );
+}
+
+// ── Main component ────────────────────────────────────────────────────────────
 
 export function DiscussionView() {
   const { mp } = useMultiplayer();
@@ -27,19 +146,86 @@ export function DiscussionView() {
     s ? (s.deceptionEliminatedPlayers as Record<string, boolean>) : {}
   ) ?? {};
   const encryptedSolution = useStorage((s) => s?.deceptionEncryptedSolutionForHost ?? null);
+  const fsPlayerId = useStorage((s) => s?.deceptionFsPlayerId ?? null);
+  const discussionTimerDuration = useStorage((s) => s?.deceptionDiscussionTimerDuration ?? 600) ?? 600;
+  const discussionTimerStart = useStorage((s) => s?.deceptionDiscussionTimerStart ?? null) ?? null;
   const currentRound = useStorage((s) => s?.deceptionCurrentRound ?? 1) ?? 1;
   const totalRounds = useStorage((s) => s?.totalRounds ?? 3) ?? 3;
   const phase = useStorage((s) => s?.deceptionPhase);
 
-  // Host-only: decrypted solution for checking accusations
   const [solution, setSolution] = useState<MurdererSolution | null>(null);
   const processedAccusers = useRef(new Set<string>());
 
+  // Accusation selection
   const [accusedPlayerId, setAccusedPlayerId] = useState<string | null>(null);
   const [accusedMeans, setAccusedMeans] = useState<string | null>(null);
   const [accusedEvidence, setAccusedEvidence] = useState<string | null>(null);
 
-  // Mutations must be declared before effects
+  // UI mode + card ordering
+  const [viewMode, setViewMode] = useState<ViewMode>("marker");
+  const [cardOrder, setCardOrder] = useState<string[]>([]);
+  const [hiddenCards, setHiddenCards] = useState<Set<string>>(new Set());
+
+  // Seed card order from players once loaded
+  useEffect(() => {
+    if (cardOrder.length === 0 && players.length > 0) {
+      setCardOrder(players.map(([id]) => id));
+    }
+  }, [players]);
+
+  const sensors = useSensors(
+    useSensor(PointerSensor, { activationConstraint: { distance: 6 } }),
+  );
+
+  function handleDragEnd(event: DragEndEvent) {
+    const { active, over } = event;
+    if (over && active.id !== over.id) {
+      setCardOrder((items) => {
+        const oldIndex = items.indexOf(active.id as string);
+        const newIndex = items.indexOf(over.id as string);
+        return arrayMove(items, oldIndex, newIndex);
+      });
+    }
+  }
+
+  function toggleHidden(key: string) {
+    setHiddenCards((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }
+
+  function selectPlayerForAccusation(id: string) {
+    if (accusedPlayerId === id) {
+      setAccusedPlayerId(null);
+      setAccusedMeans(null);
+      setAccusedEvidence(null);
+    } else {
+      setAccusedPlayerId(id);
+      setAccusedMeans(null);
+      setAccusedEvidence(null);
+    }
+  }
+
+  function selectMeans(playerId: string, card: string) {
+    if (accusedPlayerId !== playerId) {
+      setAccusedPlayerId(playerId);
+      setAccusedEvidence(null);
+    }
+    setAccusedMeans((prev) => (prev === card ? null : card));
+  }
+
+  function selectEvidence(playerId: string, card: string) {
+    if (accusedPlayerId !== playerId) {
+      setAccusedPlayerId(playerId);
+      setAccusedMeans(null);
+    }
+    setAccusedEvidence((prev) => (prev === card ? null : card));
+  }
+
+  // Mutations declared before effects
   const submitAccusation = useMutation(
     ({ storage }, playerId: string, accusedId: string, means: string, evidence: string) => {
       storage.get("deceptionAccusations").set(playerId, {
@@ -76,11 +262,11 @@ export function DiscussionView() {
     storage.set("deceptionFsHasSwappedThisRound", false);
     storage.set("deceptionPhase", "fs-placement");
     storage.set("deceptionFsTimerStart", Date.now());
+    storage.set("deceptionDiscussionTimerStart", null);
     const acc = storage.get("deceptionAccusations");
     for (const k of acc.keys()) acc.delete(k);
   }, []);
 
-  // Host: decrypt solution once on mount
   useEffect(() => {
     if (!mp.isHost || !encryptedSolution || solution) return;
     deriveKey(mp.roomCode, mp.playerId)
@@ -89,7 +275,6 @@ export function DiscussionView() {
       .catch(() => {});
   }, [encryptedSolution]);
 
-  // Host: check each new accusation as it arrives
   useEffect(() => {
     if (!mp.isHost || !solution) return;
     const murdererPlayerId = Object.entries(dealtCards).find(([, hand]) =>
@@ -115,15 +300,13 @@ export function DiscussionView() {
       }
     }
 
-    // Check if all non-eliminated investigators are now eliminated
     const investigatorIds = players
       .map(([id]) => id)
-      .filter((id) => !dealtCards[id] || (
-        // A player is an investigator if they're not the murderer
-        // We can determine this: the murderer holds the solution cards
+      .filter((id) =>
+        id !== fsPlayerId &&
         !(dealtCards[id]?.meansCards.includes(solution.meansCard) &&
           dealtCards[id]?.evidenceCards.includes(solution.evidenceCard))
-      ));
+      );
     const allEliminated = investigatorIds.every((id) => eliminatedPlayers[id] || accusations[id]);
     if (allEliminated && investigatorIds.length > 0 && Object.keys(accusations).length > 0) {
       endWithMurdererWins(murdererPlayerId, solution);
@@ -135,13 +318,43 @@ export function DiscussionView() {
     if (phase === "results") goTo("deceptionResults");
   }, [phase]);
 
+  const timeLeft = useCountdown(discussionTimerStart, discussionTimerDuration, 500);
+
+  // Host: auto-advance when discussion timer hits 0
+  useEffect(() => {
+    if (timeLeft !== 0 || !discussionTimerDuration || !mp.isHost) return;
+    if (currentRound < totalRounds) advanceToNextRound();
+    else if (solution) {
+      const murdererPlayerId = Object.entries(dealtCards).find(([, hand]) =>
+        hand.meansCards.includes(solution.meansCard) &&
+        hand.evidenceCards.includes(solution.evidenceCard)
+      )?.[0] ?? "";
+      endWithMurdererWins(murdererPlayerId, solution);
+    }
+  }, [timeLeft]);
+
   const iAmEliminated = eliminatedPlayers[mp.playerId] === true;
   const iHaveAccused = !!accusations[mp.playerId];
+  const iAmFs = mp.playerId === fsPlayerId;
   const isFinalRound = currentRound >= totalRounds;
-  const accusedHand = accusedPlayerId ? dealtCards[accusedPlayerId] : null;
+  const canAccuse =
+    !iAmFs &&
+    !iAmEliminated &&
+    !iHaveAccused &&
+    mp.deceptionRole !== "murderer" &&
+    mp.deceptionRole !== "accomplice";
+  const accusationValid = !!accusedPlayerId && !!accusedMeans && !!accusedEvidence;
+
+  // Ordered player list (falls back to storage order until DnD initializes)
+  const orderedPlayers =
+    cardOrder.length > 0
+      ? cardOrder
+          .map((id) => players.find(([pid]) => pid === id))
+          .filter((p): p is [string, { name: string; color: string }] => !!p)
+      : players;
 
   return (
-    <div className="min-h-screen flex flex-col items-center justify-start bg-background px-4 py-8 pb-24 overflow-y-auto">
+    <div className="min-h-screen flex flex-col items-center justify-start bg-background px-4 py-8 pb-36 overflow-y-auto">
       <div className="w-full max-w-md flex flex-col gap-6">
         <div className="text-center">
           <p className="text-xs uppercase tracking-widest text-muted-foreground mb-1">
@@ -153,7 +366,10 @@ export function DiscussionView() {
           </p>
         </div>
 
-        {/* Eliminated banner */}
+        {timeLeft !== null && (
+          <TimerBar timeLeft={timeLeft} duration={discussionTimerDuration} label="Discussion" />
+        )}
+
         {iAmEliminated && (
           <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-center text-destructive">
             Your accusation was wrong. You're eliminated — spectate only.
@@ -182,115 +398,191 @@ export function DiscussionView() {
           </div>
         )}
 
-        {/* Players' cards */}
+        {/* Players' cards section */}
         <div className="flex flex-col gap-3">
-          <p className="text-xs uppercase tracking-widest text-muted-foreground">Players' Cards</p>
-          {players.map(([id, info]) => {
-            const hand = dealtCards[id];
-            if (!hand) return null;
-            const isEliminated = eliminatedPlayers[id];
-            return (
-              <div
-                key={id}
-                className={`rounded-xl border bg-muted/20 px-4 py-3 flex flex-col gap-2 ${
-                  isEliminated ? "opacity-50" : ""
+          <div className="flex items-center justify-between">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Players' Cards</p>
+            <div className="flex rounded-lg border border-border overflow-hidden">
+              <button
+                onClick={() => setViewMode("marker")}
+                className={`px-3 py-1 text-xs transition-colors cursor-pointer ${
+                  viewMode === "marker"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:text-foreground"
                 }`}
               >
-                <div className="flex items-center gap-2">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
-                  <span className="text-sm font-medium text-foreground">
-                    {info.name}{id === mp.playerId ? " (you)" : ""}
-                  </span>
-                  {isEliminated && (
-                    <span className="ml-auto text-[10px] text-destructive/70 uppercase tracking-wide">eliminated</span>
-                  )}
-                </div>
-                <div className="grid grid-cols-2 gap-1.5">
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Means</p>
-                    {hand.meansCards.map((c) => (
-                      <p key={c} className="text-xs text-foreground">{c}</p>
-                    ))}
-                  </div>
-                  <div>
-                    <p className="text-[10px] uppercase tracking-widest text-muted-foreground mb-1">Evidence</p>
-                    {hand.evidenceCards.map((c) => (
-                      <p key={c} className="text-xs text-foreground">{c}</p>
-                    ))}
-                  </div>
-                </div>
-              </div>
-            );
-          })}
-        </div>
-
-        {/* Accusation form — any round, any non-eliminated investigator */}
-        {!iAmEliminated && !iHaveAccused && (
-          <div className="flex flex-col gap-4 rounded-xl border border-primary/30 bg-primary/5 px-4 py-4">
-            <div>
-              <p className="text-sm font-medium">Make your accusation</p>
-              <p className="text-xs text-muted-foreground mt-0.5">
-                One shot only — wrong and you're out
-              </p>
+                Marker Mode
+              </button>
+              <button
+                onClick={() => setViewMode("accusation")}
+                className={`px-3 py-1 text-xs transition-colors cursor-pointer border-l border-border ${
+                  viewMode === "accusation"
+                    ? "bg-primary text-primary-foreground"
+                    : "bg-background text-muted-foreground hover:text-foreground"
+                }`}
+              >
+                Accusation Mode
+              </button>
             </div>
+          </div>
 
-            <div className="flex flex-col gap-1.5">
-              <p className="text-xs text-muted-foreground uppercase tracking-widest">Suspect</p>
-              <div className="flex flex-wrap gap-1.5">
-                {players.map(([id, info]) => (
-                  <button
+          {viewMode === "marker" ? (
+            <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+              <SortableContext items={cardOrder} strategy={verticalListSortingStrategy}>
+                <div className="flex flex-col gap-2">
+                  {orderedPlayers.map(([id, info]) => {
+                    const hand = dealtCards[id];
+                    if (!hand) return null;
+                    const isEliminated = !!eliminatedPlayers[id];
+                    return (
+                      <SortableCard key={id} id={id}>
+                        {(dragHandleProps, isDragging) => (
+                          <div
+                            className={`rounded-xl border bg-muted/20 px-4 py-3 flex flex-col gap-2 transition-shadow ${
+                              isEliminated ? "opacity-50" : ""
+                            } ${isDragging ? "shadow-lg" : ""}`}
+                          >
+                            <div className="flex items-center gap-2">
+                              <span
+                                {...dragHandleProps}
+                                className="cursor-grab active:cursor-grabbing text-muted-foreground/40 hover:text-muted-foreground/70 touch-none"
+                              >
+                                <GripVertical size={14} />
+                              </span>
+                              <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
+                              <span className="text-sm font-medium text-foreground">
+                                {info.name}{id === mp.playerId ? " (you)" : ""}
+                              </span>
+                              {isEliminated && (
+                                <span className="ml-auto text-[10px] text-destructive/70 uppercase tracking-wide">eliminated</span>
+                              )}
+                            </div>
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex flex-col gap-1">
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Means</p>
+                                <div className="flex flex-col gap-1">
+                                  {hand.meansCards.map((c) => (
+                                    <CardWord
+                                      key={c}
+                                      text={c}
+                                      hidden={hiddenCards.has(`${id}:means:${c}`)}
+                                      onToggle={() => toggleHidden(`${id}:means:${c}`)}
+                                      mode="marker"
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                              <div className="flex flex-col gap-1">
+                                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Evidence</p>
+                                <div className="flex flex-col gap-1">
+                                  {hand.evidenceCards.map((c) => (
+                                    <CardWord
+                                      key={c}
+                                      text={c}
+                                      hidden={hiddenCards.has(`${id}:evidence:${c}`)}
+                                      onToggle={() => toggleHidden(`${id}:evidence:${c}`)}
+                                      mode="marker"
+                                    />
+                                  ))}
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </SortableCard>
+                    );
+                  })}
+                </div>
+              </SortableContext>
+            </DndContext>
+          ) : (
+            /* Accusation mode */
+            <div className="flex flex-col gap-2">
+              {orderedPlayers.map(([id, info]) => {
+                const hand = dealtCards[id];
+                if (!hand) return null;
+                const isEliminated = !!eliminatedPlayers[id];
+                const isSelected = accusedPlayerId === id;
+                const isSelectablePlayer = canAccuse && !isEliminated && id !== fsPlayerId;
+
+                return (
+                  <div
                     key={id}
-                    onClick={() => { setAccusedPlayerId(id); setAccusedMeans(null); setAccusedEvidence(null); }}
-                    className={`px-2.5 py-1 rounded-lg border text-xs transition-colors cursor-pointer ${
-                      accusedPlayerId === id
-                        ? "border-primary bg-primary/10 text-foreground"
-                        : "border-border text-muted-foreground hover:border-primary/40"
+                    onClick={() => isSelectablePlayer && selectPlayerForAccusation(id)}
+                    className={`rounded-xl border px-4 py-3 flex flex-col gap-2 transition-all ${
+                      isEliminated ? "opacity-50" : ""
+                    } ${
+                      isSelected
+                        ? "border-primary bg-primary/5 ring-1 ring-primary/20"
+                        : isSelectablePlayer
+                          ? "bg-muted/20 hover:border-primary/30 cursor-pointer"
+                          : "bg-muted/20 cursor-default"
                     }`}
                   >
-                    {info.name}
-                  </button>
-                ))}
-              </div>
+                    <div className="flex items-center gap-2">
+                      <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
+                      <span className={`text-sm font-medium ${isSelected ? "text-foreground" : "text-foreground"}`}>
+                        {info.name}{id === mp.playerId ? " (you)" : ""}
+                      </span>
+                      {isEliminated && (
+                        <span className="ml-auto text-[10px] text-destructive/70 uppercase tracking-wide">eliminated</span>
+                      )}
+                      {isSelected && (
+                        <span className="ml-auto text-[10px] text-primary uppercase tracking-wide font-medium">Suspect ✓</span>
+                      )}
+                    </div>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="flex flex-col gap-1">
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Means</p>
+                        <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                          {hand.meansCards.map((c) => (
+                            <CardWord
+                              key={c}
+                              text={c}
+                              hidden={hiddenCards.has(`${id}:means:${c}`)}
+                              onToggle={() => {}}
+                              selectable={isSelectablePlayer}
+                              selected={accusedPlayerId === id && accusedMeans === c}
+                              onSelect={() => selectMeans(id, c)}
+                              mode="accusation"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                      <div className="flex flex-col gap-1">
+                        <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Evidence</p>
+                        <div className="flex flex-col gap-1" onClick={(e) => e.stopPropagation()}>
+                          {hand.evidenceCards.map((c) => (
+                            <CardWord
+                              key={c}
+                              text={c}
+                              hidden={hiddenCards.has(`${id}:evidence:${c}`)}
+                              onToggle={() => {}}
+                              selectable={isSelectablePlayer}
+                              selected={accusedPlayerId === id && accusedEvidence === c}
+                              onSelect={() => selectEvidence(id, c)}
+                              mode="accusation"
+                            />
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
+          )}
+        </div>
 
-            {accusedHand && (
-              <>
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-xs text-muted-foreground uppercase tracking-widest">Their weapon</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {accusedHand.meansCards.map((c) => (
-                      <button key={c} onClick={() => setAccusedMeans(c)}
-                        className={`px-2.5 py-1 rounded-lg border text-xs transition-colors cursor-pointer ${
-                          accusedMeans === c ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:border-primary/40"
-                        }`}>{c}</button>
-                    ))}
-                  </div>
-                </div>
-                <div className="flex flex-col gap-1.5">
-                  <p className="text-xs text-muted-foreground uppercase tracking-widest">Their evidence</p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {accusedHand.evidenceCards.map((c) => (
-                      <button key={c} onClick={() => setAccusedEvidence(c)}
-                        className={`px-2.5 py-1 rounded-lg border text-xs transition-colors cursor-pointer ${
-                          accusedEvidence === c ? "border-primary bg-primary/10 text-foreground" : "border-border text-muted-foreground hover:border-primary/40"
-                        }`}>{c}</button>
-                    ))}
-                  </div>
-                </div>
-              </>
-            )}
-
-            <Button
-              disabled={!accusedPlayerId || !accusedMeans || !accusedEvidence}
-              onClick={() => submitAccusation(mp.playerId, accusedPlayerId!, accusedMeans!, accusedEvidence!)}
-              className="w-full"
-            >
-              Submit Accusation
-            </Button>
+        {/* FS cannot vote */}
+        {iAmFs && (
+          <div className="rounded-lg border border-blue-400/30 bg-blue-400/5 px-4 py-3 text-sm text-center text-blue-400">
+            As the Forensic Scientist, you cannot make accusations — guide investigators through your scene markers.
           </div>
         )}
 
-        {iHaveAccused && !iAmEliminated && (
+        {/* Accusation submitted banner */}
+        {!iAmFs && iHaveAccused && !iAmEliminated && (
           <div className="rounded-xl border bg-muted/30 px-4 py-3 text-sm">
             <p className="text-muted-foreground mb-1">Your accusation — waiting for verdict</p>
             <p className="font-medium">
@@ -308,11 +600,13 @@ export function DiscussionView() {
             id,
             name: info.name,
             color: info.color,
-            rightNode: eliminatedPlayers[id]
-              ? <span className="text-destructive/70 text-xs">Eliminated</span>
-              : accusations[id]
-                ? <DoneNode label="Accused" />
-                : <WaitingNode label="Thinking" />,
+            rightNode: id === fsPlayerId
+              ? <span className="text-blue-400 text-xs">Forensic Scientist</span>
+              : eliminatedPlayers[id]
+                ? <span className="text-destructive/70 text-xs">Eliminated</span>
+                : accusations[id]
+                  ? <DoneNode label="Accused" />
+                  : <WaitingNode label="Thinking" />,
           }))}
         />
 
@@ -349,6 +643,37 @@ export function DiscussionView() {
           </p>
         )}
       </div>
+
+      {/* Sticky submit accusation button */}
+      {canAccuse && viewMode === "accusation" && (
+        <div className="fixed bottom-0 left-0 right-0 flex justify-center px-4 pb-6 pt-4 bg-gradient-to-t from-background via-background/95 to-transparent pointer-events-none">
+          <div className="w-full max-w-md pointer-events-auto">
+            {accusationValid ? (
+              <div className="mb-2 text-center text-xs text-muted-foreground">
+                Accusing{" "}
+                <span className="font-medium text-foreground">
+                  {players.find(([id]) => id === accusedPlayerId)?.[1].name}
+                </span>
+                {" · "}
+                <span className="text-foreground">{accusedMeans}</span>
+                {" · "}
+                <span className="text-foreground">{accusedEvidence}</span>
+              </div>
+            ) : (
+              <div className="mb-2 text-center text-xs text-muted-foreground">
+                Select a suspect, their means, and evidence
+              </div>
+            )}
+            <Button
+              disabled={!accusationValid}
+              onClick={() => submitAccusation(mp.playerId, accusedPlayerId!, accusedMeans!, accusedEvidence!)}
+              className="w-full"
+            >
+              Submit Accusation
+            </Button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

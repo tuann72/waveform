@@ -82,32 +82,31 @@ export type Storage = {
   deceptionEncryptedRoles: LiveMap<string, string>;     // playerId → encrypted DeceptionRoleBlob
   deceptionEncryptedRoleMapForHost: string | null;      // encrypted DeceptionRoleMapBlob for host
   deceptionEncryptedSolutionForHost: string | null;     // encrypted MurdererSolution, set by murderer
+  deceptionEncryptedSolutionForFs: string | null;       // same solution, encrypted for FS to read
+  deceptionFsPlayerId: string | null;                   // public: who the forensic scientist is
   deceptionRevealedSolution: { murdererPlayerId: string; meansCard: string; evidenceCard: string } | null;
   deceptionRoleAcknowledged: LiveMap<string, boolean>;
   deceptionAccusations: LiveMap<string, { accusedPlayerId: string; meansCard: string; evidenceCard: string }>;
   deceptionCurrentRound: number;
-  deceptionFsTimerDuration: number;   // seconds; 0 = no limit
+  deceptionFsTimerDuration: number;           // seconds; 0 = no limit
   deceptionFsTimerStart: number | null;
+  deceptionDiscussionTimerDuration: number;   // seconds; 0 = no limit
+  deceptionDiscussionTimerStart: number | null;
   deceptionEnableAccomplice: boolean;
   deceptionTilePool: Array<{ category: string; options: string[] }>;
   deceptionFsHasSwappedThisRound: boolean;
   deceptionEliminatedPlayers: LiveMap<string, boolean>;  // investigators who accused wrongly
 };
 
-// Clears all per-game data from storage. Does NOT touch players, gameMode,
-// totalRounds, clueTimerDuration, guessTimerDuration, selectedCategories, or hostId.
+// Clears all per-game data from storage. Does NOT touch players, hostId,
+// gameMode, totalRounds, timers, selectedCategories, colorPaletteName,
+// or deception lobby settings — those persist for Play Again.
 // Call this inside any mutation that needs to reset between games.
 export function clearGameData(storage: LiveObject<Storage>) {
   storage.set("phase", "lobby");
   storage.set("currentGuessIndex", 0);
   storage.set("cluePhaseStartTime", null);
   storage.set("guessPhaseStartTime", null);
-  storage.set("gameMode", "classic");
-  storage.set("totalRounds", 3);
-  storage.set("clueTimerDuration", 90);
-  storage.set("guessTimerDuration", 90);
-  storage.set("selectedCategories", []);
-  storage.set("colorPaletteName", "base");
   const playerDials = storage.get("playerDials");
   for (const k of playerDials.keys()) playerDials.delete(k);
   const playerClues = storage.get("playerClues");
@@ -127,11 +126,12 @@ export function clearGameData(storage: LiveObject<Storage>) {
   storage.set("deceptionSceneTiles", null);
   storage.set("deceptionEncryptedRoleMapForHost", null);
   storage.set("deceptionEncryptedSolutionForHost", null);
+  storage.set("deceptionEncryptedSolutionForFs", null);
+  storage.set("deceptionFsPlayerId", null);
   storage.set("deceptionRevealedSolution", null);
   storage.set("deceptionCurrentRound", 1);
-  storage.set("deceptionFsTimerDuration", 120);
   storage.set("deceptionFsTimerStart", null);
-  storage.set("deceptionEnableAccomplice", false);
+  storage.set("deceptionDiscussionTimerStart", null);
   const deceptionDealtCards = storage.get("deceptionDealtCards");
   for (const k of deceptionDealtCards.keys()) deceptionDealtCards.delete(k);
   const deceptionMarkers = storage.get("deceptionMarkers");
