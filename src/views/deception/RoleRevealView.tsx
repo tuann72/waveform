@@ -7,7 +7,7 @@ import { PlayerStatusList, DoneNode, WaitingNode } from "@/components/game/Playe
 import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { useLeaveRoom } from "@/hooks/useLeaveRoom";
-import type { DeceptionRole, DeceptionRoleBlob, DeceptionRoleMapBlob } from "@/types/deception";
+import type { DeceptionRole, DeceptionRoleBlob } from "@/types/deception";
 
 const ROLE_INFO: Record<DeceptionRole, { label: string; description: string; color: string }> = {
   "forensic-scientist": {

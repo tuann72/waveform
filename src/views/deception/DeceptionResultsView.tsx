@@ -15,9 +15,6 @@ export function DeceptionResultsView() {
     s ? (s.deceptionAccusations as Record<string, { accusedPlayerId: string; meansCard: string; evidenceCard: string }>) : {}
   ) ?? {};
   const revealedSolution = useStorage((s) => s?.deceptionRevealedSolution ?? null);
-  const dealtCards = useStorage((s) =>
-    s ? (s.deceptionDealtCards as Record<string, { meansCards: string[]; evidenceCards: string[] }>) : {}
-  ) ?? {};
   const deceptionPhase = useStorage((s) => s?.deceptionPhase);
 
   // Non-host: navigate to waiting room when host resets via Play Again
