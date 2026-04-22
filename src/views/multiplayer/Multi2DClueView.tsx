@@ -75,7 +75,7 @@ export function Multi2DClueView() {
   const [rerollsUsedX, setRerollsUsedX] = useState(0)
   const [rerollsUsedY, setRerollsUsedY] = useState(0)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
-  const maxRerolls = Math.ceil(totalRounds / 2)
+  const maxRerolls = totalRounds * 2
   const savedOnExpiryRef = useRef(false)
 
   if (myDials.length > 0 && myDials.length !== cluesInitializedFor) {
