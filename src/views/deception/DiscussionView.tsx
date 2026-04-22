@@ -348,9 +348,10 @@ export function DiscussionView() {
   // Ordered player list (falls back to storage order until DnD initializes)
   const orderedPlayers =
     cardOrder.length > 0
-      ? cardOrder
-          .map((id) => players.find(([pid]) => pid === id))
-          .filter((p): p is [string, { name: string; color: string }] => !!p)
+      ? cardOrder.flatMap((id) => {
+          const entry = players.find(([pid]) => pid === id);
+          return entry ? [entry] : [];
+        })
       : players;
 
   return (
