@@ -10,6 +10,8 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { spectrumCards } from "@/data/spectrumCards";
 import { Ellipsis } from "@/components/ui/ellipsis";
+import { TimerBar } from "@/components/game/TimerBar";
+import { useCountdown } from "@/hooks/useCountdown";
 
 function shuffle<T>(arr: T[]): T[] {
   const a = [...arr];
@@ -30,12 +32,6 @@ function pickDials(totalRounds: number, selectedCategories: string[]): DialConfi
     right: card.right,
     targetPosition: Math.random() * 96 + 2,
   }));
-}
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
 }
 
 export function MultiClueView() {
@@ -60,7 +56,6 @@ export function MultiClueView() {
   const [cluesInitializedFor, setCluesInitializedFor] = useState(0);
   const [hasSubmitted, setHasSubmitted] = useState(false);
   const [hasRerolled, setHasRerolled] = useState(false);
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const savedOnExpiryRef = useRef(false);
 
   // Initialize local clues when my dials load
@@ -71,18 +66,7 @@ export function MultiClueView() {
 
   const effectiveTimerDuration = clueTimerDuration * totalRounds;
   const timerActive = clueTimerDuration > 0 && cluePhaseStartTime !== null;
-
-  // Countdown timer
-  useEffect(() => {
-    if (!clueTimerDuration || !cluePhaseStartTime) return;
-    const tick = () => {
-      const elapsed = Math.floor((Date.now() - cluePhaseStartTime) / 1000);
-      setTimeLeft(Math.max(0, effectiveTimerDuration - elapsed));
-    };
-    tick();
-    const interval = setInterval(tick, 500);
-    return () => clearInterval(interval);
-  }, [clueTimerDuration, cluePhaseStartTime, effectiveTimerDuration]);
+  const timeLeft = useCountdown(cluePhaseStartTime, effectiveTimerDuration);
   const timerExpired = timerActive && timeLeft === 0;
 
   // Auto-navigate when phase advances
@@ -242,14 +226,6 @@ export function MultiClueView() {
 
   const myCluesSubmitted = hasSubmitted || timerExpired;
 
-  const timerPercent =
-    timerActive && timeLeft !== null && effectiveTimerDuration > 0
-      ? (timeLeft / effectiveTimerDuration) * 100
-      : 100;
-  const timerBarColor =
-    timerPercent > 30 ? "bg-primary" : timerPercent > 10 ? "bg-amber-500" : "bg-red-500";
-  const timerTextColor =
-    timerPercent <= 10 ? "text-red-500" : timerPercent <= 30 ? "text-amber-500" : "text-foreground";
 
   if (!myDials.length) {
     return (
@@ -272,23 +248,7 @@ export function MultiClueView() {
           </p>
         </div>
 
-        {/* Countdown timer */}
-        {timerActive && (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted-foreground">Time remaining</span>
-              <span className={`text-sm font-mono font-semibold tabular-nums ${timerTextColor}`}>
-                {timerExpired ? "Time's up!" : formatTime(timeLeft ?? 0)}
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-              <div
-                className={`h-full rounded-full transition-all duration-500 ${timerBarColor}`}
-                style={{ width: `${timerPercent}%` }}
-              />
-            </div>
-          </div>
-        )}
+        {timerActive && <TimerBar timeLeft={timeLeft} duration={effectiveTimerDuration} />}
 
         {/* Progress indicator */}
         <div className="flex items-center">

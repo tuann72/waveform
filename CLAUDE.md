@@ -2,7 +2,7 @@
 
 ## Overview
 
-Real-time multiplayer party game. Three modes: Classic (spectrum dials), 2D (spectrum planes), Colorform (color-matching). Players share a room code, write clues, all non-authors guess simultaneously. No single-player mode.
+Real-time multiplayer party game. Four modes: Classic (spectrum dials), 2D (spectrum planes), Colorform (color-matching), Deception (social deduction). Players share a room code. No single-player mode.
 
 **Stack:** Vite + React 19 + TypeScript + Tailwind v4 + shadcn/ui + Liveblocks v3. State-driven views — no React Router.
 
@@ -14,36 +14,42 @@ Real-time multiplayer party game. Three modes: Classic (spectrum dials), 2D (spe
 src/
 ├── App.tsx                    ← GameRouter + RoomOrchestrator + RoomNavigator + InRoomViews
 ├── types/game.ts              ← AppView, ZONE_WIDTHS/POINTS, GameState, SpectrumCard
+├── types/deception.ts         ← DeceptionRole, DeceptionPhase, MurdererSolution, blobs
 ├── data/spectrumCards.ts      ← 93 cards, 8 categories
+├── data/deceptionCards.ts     ← 95 means, 286 evidence, 20 scene tiles, 4 location sets
 ├── context/
 │   ├── GameContext.tsx        ← view router (goTo/resetGame)
 │   └── MultiplayerContext.tsx ← sessionStorage state (name, roomCode, playerId, isHost)
 ├── hooks/
 │   ├── useDialDrag.ts         ← pointer-capture drag
-│   └── useLeaveRoom.ts        ← shared leave logic (WaitingRoom + Results)
+│   ├── useLeaveRoom.ts        ← shared leave logic (WaitingRoom + Results)
+│   └── useCountdown.ts        ← timestamp-based countdown; returns timeLeft | null
 ├── lib/
 │   ├── liveblocks.ts          ← Storage/Presence types, clearGameData, typed hooks
-│   ├── colorPalette.ts        ← 512-color wheel, chebyshevDistance, calcColorPoints, pickColorOptions
+│   ├── crypto.ts              ← deriveKey / encryptJson / decryptJson (Web Crypto AES-GCM)
+│   ├── deceptionDealer.ts     ← assignRoles, dealCards, drawSceneTiles (returns tiles+pool)
+│   ├── colorPalette.ts        ← 512-color wheel, chebyshevDistance, calcColorPoints
 │   ├── scoring.ts             ← calcPoints, calcPoints2D, applyDoubleDown
 │   └── utils.ts               ← cn() helper
 ├── components/game/
-│   ├── SpectrumDial.tsx       ← 1D dial; extraNeedles prop for multiplayer reveal
+│   ├── SpectrumDial.tsx       ← 1D dial; extraNeedles prop
 │   ├── SpectrumPlane.tsx      ← Canvas 2D plane; extraPoints prop; 400×400 internal
-│   ├── ColorGrid.tsx          ← 32×16 swatch grid; Chebyshev zone borders; target outline
+│   ├── ColorGrid.tsx          ← 32×16 swatch grid; Chebyshev zone borders
+│   ├── TimerBar.tsx           ← shared timer bar (green→amber→red); props: timeLeft, duration
+│   ├── PlayerStatusList.tsx   ← shared player status rows; DoneNode/WaitingNode helpers
 │   ├── MultiGuessBase.tsx     ← shared Classic+2D guess logic (mode discriminated union)
-│   ├── ResultsView.tsx        ← shared results layout for all modes (render props)
+│   ├── ResultsView.tsx        ← shared results layout for Classic/2D/Colorform (render props)
 │   └── EmojiReactions.tsx     ← hamster reactions; floating animation
 └── views/multiplayer/
-    ├── WaitingRoomView.tsx    ← lobby: mode/rounds/timers/categories/palette, player list
-    ├── MultiClueView.tsx      ← Classic clue entry
-    ├── MultiGuessView.tsx     ← thin wrapper → MultiGuessBase { kind:"classic" }
-    ├── MultiResultsView.tsx   ← thin wrapper → ResultsView
-    ├── Multi2DClueView.tsx    ← 2D clue entry (timer ×2, SpectrumPlane)
-    ├── Multi2DGuessView.tsx   ← thin wrapper → MultiGuessBase { kind:"2d" }
-    ├── Multi2DResultsView.tsx ← thin wrapper → ResultsView (no By Player tab)
-    ├── ColorformClueView.tsx  ← 3 large swatches (w-40), pick + clue input
-    ├── ColorformGuessView.tsx ← ColorGrid, zone reveal after all locked
-    └── ColorformResultsView.tsx ← thin wrapper → ResultsView
+    ├── WaitingRoomView.tsx    ← lobby; all mode settings; async handleStartDeception
+    ├── MultiClueView.tsx / MultiGuessView.tsx / MultiResultsView.tsx
+    ├── Multi2DClueView.tsx / Multi2DGuessView.tsx / Multi2DResultsView.tsx
+    ├── ColorformClueView.tsx / ColorformGuessView.tsx / ColorformResultsView.tsx
+    └── ../deception/
+        ├── RoleRevealView.tsx          ← decrypt role; murderer picks solution; readiness gate
+        ├── FsPlacementView.tsx         ← marker placement; 1 tile swap per round
+        ├── DiscussionView.tsx          ← accusation form any round; host checks immediately
+        └── DeceptionResultsView.tsx    ← reveal truth; Play Again resets all
 ```
 
 ---
@@ -52,113 +58,86 @@ src/
 
 ```ts
 type RoomPhase = "lobby" | "clue" | "guessing" | "results"
-type GameMode  = "classic" | "2d" | "colorform"
-
-type Storage = {
-  phase: RoomPhase;  gameMode: GameMode;  totalRounds: number;
-  clueTimerDuration: number;       // seconds; 0 = no limit
-  cluePhaseStartTime: number | null;
-  guessTimerDuration: number;      // seconds; 0 = no limit
-  guessPhaseStartTime: number | null;  // reset per queue entry by advanceGuess
-  selectedCategories: string[];    // empty = all (Classic+2D only)
-  hostId: string;  roomPassword: string | null;
-  players:       LiveMap<string, { name: string; isHost: boolean; color: string }>;
-  playerDials:   LiveMap<string, DialConfig[]>;       // Classic
-  player2DDials: LiveMap<string, Dial2DConfig[]>;     // 2D
-  playerClues:   LiveMap<string, string[]>;
-  guessingQueue: LiveList<{ dialIndex: number; authorId: string }>;
-  currentGuessIndex: number;
-  guessResults:  LiveMap<string, { position: number; posY?: number; points: number; doubleDown?: boolean }>;
-  colorPaletteName: "base" | "deuteranomaly";         // Colorform
-  playerColors:  LiveMap<string, number[]>;            // Colorform palette index per round
-  colorOptions:  LiveMap<string, number[][]>;          // Colorform 3 swatch options per round
-}
-
-type Presence = {
-  playerName: string;  cluesComplete: boolean;  playerId: string | null;
-  dialPosition: number | null;    // Classic: needle; 2D: x
-  dialPositionY: number | null;   // 2D only: y
-  reaction: { emoji: string; id: string } | null;  // hamster path + random id
-}
+type GameMode  = "classic" | "2d" | "colorform" | "deception"
+type DeceptionPhase = "role-reveal" | "fs-placement" | "discussion" | "results"
 ```
 
-**`clearGameData(storage)`** — resets phase, both startTimes, gameMode, totalRounds, both timerDurations, selectedCategories, colorPaletteName, clears all collections. Does NOT touch `players`, `hostId`, `roomPassword`.
+Classic/2D/Colorform fields unchanged (players, playerDials, player2DDials, playerClues, guessingQueue, currentGuessIndex, guessResults, colorPaletteName, playerColors, colorOptions).
 
-**Room ID:** `waveform-${roomCode}`
+Deception-specific:
+```ts
+deceptionPhase: DeceptionPhase | null
+deceptionDealtCards:              LiveMap<id, { meansCards, evidenceCards }>
+deceptionSceneTiles:              Array<{ category, options }> | null   // 6 tiles
+deceptionTilePool:                Array<{ category, options }>           // swappable reserve
+deceptionMarkers:                 LiveMap<category, optionIndex>
+deceptionEncryptedRoles:          LiveMap<id, string>   // per-player AES-GCM blob
+deceptionEncryptedRoleMapForHost: string | null
+deceptionEncryptedSolutionForHost: string | null        // written by murderer
+deceptionRevealedSolution:        { murdererPlayerId, meansCard, evidenceCard } | null
+deceptionRoleAcknowledged:        LiveMap<id, boolean>
+deceptionAccusations:             LiveMap<id, { accusedPlayerId, meansCard, evidenceCard }>
+deceptionEliminatedPlayers:       LiveMap<id, boolean>
+deceptionCurrentRound:            number
+deceptionFsTimerDuration:         number    // seconds; 0 = no limit
+deceptionFsTimerStart:            number | null
+deceptionFsHasSwappedThisRound:   boolean
+deceptionEnableAccomplice:        boolean
+```
+
+**`clearGameData(storage)`** — resets all per-game fields including all deception maps. Does NOT touch `players`, `hostId`, `roomPassword`.
 
 ---
 
 ## App.tsx
 
-**`InRoomViews`** — reads `gameMode` from storage, routes to correct mode's clue/guess/results components. WaitingRoom is mode-agnostic.
+**`ROOM_VIEWS`** — set of all view names that render inside `RoomProvider`. Must include deception views or `GameRouter` returns null.
 
-**`RoomOrchestrator`** (null-rendering) — host promotion: watches presence for `hostId`; if host absent, schedules `promoteToHost` after 3s debounce. Atomic mutation checks `hostId === oldHostId` to prevent races. Also syncs `setIsHost(true)` when `hostId` changes to own playerId. Kick detection: `wasRegisteredRef` + `isInPlayers` watch → `clearRoom()` + `goTo("start")`.
+**`InRoomViews`** — checks `gameMode` first, routes deception views before falling through to other modes.
 
-**`RoomNavigator`** (null-rendering) — on mount, if `state.view === "waitingRoom"` and phase is mid-game, redirects to correct view.
+**`RoomNavigator`** — on mount with `state.view === "waitingRoom"`: checks `gameMode === "deception"` + `deceptionPhase` first, then falls back to existing `phase`-based redirect for other modes.
 
-**initialStorage:** `phase:"lobby"`, `gameMode:"classic"`, `clueTimerDuration:90`, `guessTimerDuration:90`, both startTimes `null`, empty collections.
+**`initialStorage`** — must include all deception LiveMap fields initialized as `new LiveMap()` and scalar fields with defaults.
+
+---
+
+## Deception Game Flow
+
+**WaitingRoom → start:** host calls async `handleStartDeception()` → assigns roles, deals cards, draws 6 scene tiles + tile pool, encrypts role blob per player (AES-GCM, key = `PBKDF2(roomCode + playerId)`), encrypts role map + solution slot for host → calls `startDeceptionGame` mutation → `goTo("deceptionRoleReveal")`.
+
+**Role Reveal:** each client decrypts own blob. Murderer picks solution cards → encrypts for host → writes `deceptionEncryptedSolutionForHost` → acknowledges. Others acknowledge directly. Host watches: all acknowledged + solution written → advance to `fs-placement`.
+
+**FS Placement (each round):** FS adjusts markers freely on all 6 tiles. Can swap ONE non-permanent tile (indices 2–5; index 0=Location, 1=Cause of Death are fixed) from the pool per round — `deceptionFsHasSwappedThisRound` prevents a second swap. Timer or "Done" → advance to `discussion`.
+
+**Discussion (each round):** Any non-eliminated investigator can submit one accusation (one shot total for the game). Host decrypts solution once on mount, watches `deceptionAccusations` via `processedAccusers` ref. Correct → write `deceptionRevealedSolution` + set phase `results`. Wrong → `eliminatePlayer`. All eliminated → murderer wins. Host has "Next Round" (not final) or "End Game — Murderer Escapes" (final round) buttons. `advanceToNextRound` resets `deceptionFsHasSwappedThisRound`, clears accusations, increments round.
+
+**Results:** `deceptionRevealedSolution` is always written before phase becomes `results`. Non-hosts watch `deceptionPhase === null` (after host Play Again → `clearGameData`) to navigate back to `waitingRoom`.
 
 ---
 
 ## Shared Components
 
-### `ResultsView` (all three modes)
-
-Reads shared storage itself. Accepts two render props:
-- `renderByRoundEntry(ctx)` — inner content per (dialIndex, authorId) card in By Round
-- `renderByPlayerGuess?(ctx)` — inner content per guess in By Player; omit to hide tab (2D)
-
-Wrapper views only read mode-specific storage and pass closures.
-
-### `MultiGuessBase` (Classic + 2D)
-
-```ts
-type GuessMode =
-  | { kind: "classic"; playerDials: Record<string, DialConfig[]> }
-  | { kind: "2d"; player2DDials: Record<string, Dial2DConfig[]> }
+### `TimerBar` + `useCountdown`
+```tsx
+const timeLeft = useCountdown(startTime, duration, tickMs?); // null = not started
+<TimerBar timeLeft={timeLeft} duration={duration} label="..." />
 ```
+Used in: MultiGuessBase, MultiClueView, FsPlacementView.
 
-Owns: `{x,y}` position state (Classic ignores y), guess timer, auto-lock-in on expiry, 12s auto-advance, guesser status list, Double Down, Lock In / Next, `advanceGuess` mutation.
-
-Switches on `mode.kind` for: dial lookup, scoring (`calcPoints` vs `calcPoints2D`), result shape (`posY`), presence fields, timer multiplier (×1 vs ×2), rendered component (`SpectrumDial` vs `SpectrumPlane`).
+### `PlayerStatusList`
+```tsx
+<PlayerStatusList myPlayerId={id} entries={[{ id, name, color, rightNode }]} />
+```
+`DoneNode` / `WaitingNode` for common right-side states. Used in: MultiGuessBase, RoleRevealView, DiscussionView.
 
 ---
 
 ## Timer System
 
-Options: 30s / 1 min / 90s / 2 min / No limit (0). Default 90s. Configured independently in WaitingRoom.
-
-**2D doubling:** base value stored as-is (e.g. 90). WaitingRoom renders `label2x` when `gameMode === "2d"`. Views multiply internally. Switching to 2D auto-sets both timers to 60 (shows as "2 min").
-
-**Clue timer:** `effectiveTimerDuration = clueTimerDuration × totalRounds` (×2 for 2D). Timestamp-based — survives refresh. On expiry: auto-save partial clues, set `presence.cluesComplete = true`; host advances with 5s fallback.
-
-**Guess timer:** `effectiveTimer = guessTimerDuration` (×2 for 2D). `guessPhaseStartTime` set on `advanceToGuessing`, reset on each `advanceGuess`. On expiry: `savedOnExpiryRef` guards auto-lock-in.
-
----
-
-## Game Flow
-
-**WaitingRoom:** `initRoom` (host) / `registerPlayer` (non-host) on storage load — both no-op if already registered. `startGame` sets `cluePhaseStartTime` + `phase:"clue"`. Host navigates directly; non-hosts watch `phase` via `seenLobby` ref. Leave: host+only → delete room API; host+others → promote next player; non-host → remove self.
-
-**Clue phase:** Each player saves their dials/colors on mount (no-op if set). Timer bar color: green → amber (≤30%) → red (≤10%). On full submission (or timer expiry), `advanceToGuessing` builds the queue and sets `guessPhaseStartTime`. Empty queue → jumps to results.
-
-**Queue format:** `for d in [0..maxDials): for authorId: if clue[d] non-empty → push {dialIndex:d, authorId}`
-
-**Guess phase:** Works through `guessingQueue[currentGuessIndex]`. Author sees live extraNeedles/extraPoints (presence) + zones always. Guessers see own needle only until `allGuessersLocked`, then zones reveal. After all locked: 12s countdown; author clicks Next or auto-advances. `advanceGuess` increments index and resets `guessPhaseStartTime`.
-
-**Results:** Score = sum of `guessResults[key].points` per guesser. By Round: two-level collapsible (round → author). By Player: per-player collapsible with colored border. Play Again: `clearGameData` keeping `players` intact.
-
----
-
-## Scoring
-
-| Mode | Function | Points |
-|---|---|---|
-| Classic | `calcPoints(pos, target)` | 4/3/2/0 — zone widths ±2/±6/±10 |
-| 2D | `calcPoints2D(x,y,tx,ty)` | 4/3/2/0 — Euclidean radii 3/8/12 |
-| Colorform | `calcColorPoints(guess, target)` | 3/2/1/0 — Chebyshev 0/1/2 |
-
-`applyDoubleDown(raw, dd)`: non-zero → ×2; zero → −2.
+Options: 30s / 1 min / 90s / 2 min / No limit (0). All timers timestamp-based — survive refresh.
+- **Clue:** `effectiveTimerDuration = clueTimerDuration × totalRounds` (×2 for 2D internally).
+- **Guess:** per queue entry; `guessPhaseStartTime` reset by `advanceGuess`.
+- **FS Placement:** `deceptionFsTimerDuration`, independent of other timers.
 
 ---
 
@@ -166,23 +145,18 @@ Options: 30s / 1 min / 90s / 2 min / No limit (0). Default 90s. Configured indep
 
 - **`useMutation` before `useEffect`:** block-scoped `const` is not hoisted — mutations used in effects must be declared first.
 - **`useStorage` returns null during load:** always add `?? fallback` after the call.
-- **`Dial2DConfig` type cast:** use `as unknown as Record<string, Dial2DConfig[]>` when reading from storage.
-- **`DialConfig` vs `SpectrumCard`:** `category` is optional on `SpectrumCard` so both types pass as `card` prop.
-- **Motion `Variants`:** annotate at module level (`const item: Variants = {...}`), not inside JSX.
-- **`savedOnExpiryRef`:** reset on `currentGuessIndex` change; guards both clue auto-save and guess auto-lock.
-- **Host navigation guard:** hosts navigate via button only, never via phase `useEffect`. Non-hosts use `seenLobby` ref.
+- **`ROOM_VIEWS` in App.tsx:** every navigable in-room view name must be in this set or `GameRouter` returns null (blank screen).
+- **Async before mutation:** deception game start does crypto work async, then calls a sync mutation with pre-computed data.
+- **`processedAccusers` ref:** host-side ref in `DiscussionView` prevents double-processing accusations across re-renders.
+- **`Dial2DConfig` type cast:** `as unknown as Record<string, Dial2DConfig[]>` when reading from storage.
+- **Motion `Variants`:** annotate at module level, not inside JSX.
+- **Host navigation guard:** hosts navigate via button only. Non-hosts use `seenLobby` ref (Classic/2D/Colorform) or `RoomNavigator` (Deception).
 
 ---
 
-## ColorGrid (`src/components/game/ColorGrid.tsx`)
+## ColorGrid + Color Palette
 
-32×16 grid, 1px gap, black background. Zone borders drawn as absolute `2px` spans on outer edges of zone-boundary cells (`BORDER_Z1 = rgba(255,255,255,0.95)` for dist≤1, `BORDER_Z2 = rgba(255,255,255,0.55)` for dist≤2). Target cell (`targetIndex`) gets same-style white border on all 4 edges + semi-transparent overlay. Selected cell shows centered white dot.
-
----
-
-## Color Palette (`src/lib/colorPalette.ts`)
-
-512 cells (32×16). `atan2` angle → hue; distance from center → saturation/lightness. Base: red/blue/green/yellow. Deuteranomaly: cyan/yellow/magenta/blue (180° rotation, avoids red-green axis). `pickColorOptions()` returns 3 vivid (dist ≥ 0.5) random indices.
+32×16 grid. Zone borders as absolute `2px` spans (`BORDER_Z1 = rgba(255,255,255,0.95)` dist≤1, `BORDER_Z2 = rgba(255,255,255,0.55)` dist≤2). 512-cell wheel: `atan2` angle → hue, distance → saturation/lightness. Deuteranomaly: 180° rotation of base, avoids red-green axis.
 
 ---
 
@@ -193,4 +167,4 @@ VITE_LIVEBLOCKS_PUBLIC_KEY=pk_...   ← browser
 LIVEBLOCKS_SECRET_KEY=sk_...        ← server only
 ```
 
-`DELETE /api/delete-room?roomId=` — Vite middleware proxies to Liveblocks REST without leaking secret. Called when last player leaves.
+`DELETE /api/delete-room?roomId=` — Vite middleware proxies to Liveblocks REST. Called when last player leaves.

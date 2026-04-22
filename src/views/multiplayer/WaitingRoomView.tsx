@@ -18,6 +18,9 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { QRCodeSVG } from "qrcode.react";
 import { COLOR_PALETTE, COLOR_PALETTE_DEUTERANOMALY, PALETTE_COLS } from "@/lib/colorPalette";
 import type { PaletteName } from "@/lib/colorPalette";
+import { deriveKey, encryptJson } from "@/lib/crypto";
+import { assignRoles, dealCards, drawSceneTiles } from "@/lib/deceptionDealer";
+import type { DeceptionRoleMapBlob } from "@/types/deception";
 
 export function WaitingRoomSkeleton() {
   return (
@@ -186,10 +189,13 @@ export function WaitingRoomView() {
   const guessTimerDuration = useStorage((s) => s?.guessTimerDuration ?? 90);
   const selectedCategories = useStorage((s) => s?.selectedCategories ?? []) ?? [];
   const colorPaletteName = (useStorage((s) => s?.colorPaletteName) ?? "base") as PaletteName;
+  const deceptionFsTimerDuration = useStorage((s) => s?.deceptionFsTimerDuration ?? 120) ?? 120;
+  const enableAccomplice = useStorage((s) => s?.deceptionEnableAccomplice ?? false) ?? false;
 
   const [copied, setCopied] = useState<"code" | "link" | null>(null);
   const [noHostFound, setNoHostFound] = useState(false);
   const [colorPickerOpen, setColorPickerOpen] = useState(false);
+  const [startingDeception, setStartingDeception] = useState(false);
   const storageLoaded = useStorage((s) => s !== null);
   const { leaving, handleLeave } = useLeaveRoom();
   // Non-hosts navigate when phase changes lobby → clue.
@@ -302,18 +308,83 @@ export function WaitingRoomView() {
     setSelectedCategories(next);
   }
 
+  const setDeceptionFsTimer = useMutation(({ storage }, duration: number) => {
+    storage.set("deceptionFsTimerDuration", duration);
+  }, []);
+
+  const setDeceptionAccomplice = useMutation(({ storage }, enabled: boolean) => {
+    storage.set("deceptionEnableAccomplice", enabled);
+  }, []);
+
   const startGame = useMutation(({ storage }) => {
     storage.set("cluePhaseStartTime", Date.now());
     storage.set("phase", "clue");
   }, []);
 
+  const startDeceptionGame = useMutation(
+    ({ storage }, data: {
+      encryptedRoles: Record<string, string>;
+      encryptedRoleMapForHost: string;
+      dealtCards: Record<string, { meansCards: string[]; evidenceCards: string[] }>;
+      sceneTiles: Array<{ category: string; options: string[] }>;
+      tilePool: Array<{ category: string; options: string[] }>;
+    }) => {
+      const roles = storage.get("deceptionEncryptedRoles");
+      for (const [id, blob] of Object.entries(data.encryptedRoles)) roles.set(id, blob);
+      storage.set("deceptionEncryptedRoleMapForHost", data.encryptedRoleMapForHost);
+      const cards = storage.get("deceptionDealtCards");
+      for (const [id, hand] of Object.entries(data.dealtCards)) cards.set(id, hand);
+      storage.set("deceptionSceneTiles", data.sceneTiles);
+      storage.set("deceptionTilePool", data.tilePool);
+      storage.set("deceptionCurrentRound", 1);
+      storage.set("deceptionFsHasSwappedThisRound", false);
+      storage.set("deceptionPhase", "role-reveal");
+    },
+    [],
+  );
+
+  async function handleStartDeception() {
+    setStartingDeception(true);
+    try {
+      const playerIds = players.map(([id]) => id);
+      const roleMap: DeceptionRoleMapBlob = assignRoles(playerIds, enableAccomplice);
+      const dealtCards = dealCards(playerIds);
+      const { tiles: sceneTiles, pool: tilePool } = drawSceneTiles();
+
+      // Encrypt per-player role blobs
+      const encryptedRoles: Record<string, string> = {};
+      for (const [playerId, role] of Object.entries(roleMap.roles)) {
+        const key = await deriveKey(mp.roomCode, playerId);
+        const blob = {
+          role,
+          ...(role === "accomplice" ? { murdererPlayerId: roleMap.murdererPlayerId } : {}),
+        };
+        encryptedRoles[playerId] = await encryptJson(blob, key);
+      }
+
+      // Encrypt full role map for host (used at results to reveal)
+      const hostKey = await deriveKey(mp.roomCode, mp.playerId);
+      const encryptedRoleMapForHost = await encryptJson(roleMap, hostKey);
+
+      startDeceptionGame({ encryptedRoles, encryptedRoleMapForHost, dealtCards, sceneTiles, tilePool });
+      goTo("deceptionRoleReveal");
+    } finally {
+      setStartingDeception(false);
+    }
+  }
+
   function handleStart() {
+    if (gameMode === "deception") {
+      handleStartDeception();
+      return;
+    }
     startGame();
     goTo("multiClue");
   }
 
   const playerCount = players?.length ?? 0;
-  const canStart = mp.isHost && playerCount >= 2;
+  const minPlayers = gameMode === "deception" ? (enableAccomplice ? 5 : 4) : 2;
+  const canStart = mp.isHost && playerCount >= minPlayers && !startingDeception;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-center gap-6 bg-background px-4">
@@ -373,23 +444,28 @@ export function WaitingRoomView() {
                 </button>
               ))}
             </div>
-            {/* Colorform separated */}
+            {/* Colorform + Deception separated */}
             <div className="flex items-center gap-2">
               <div className="flex-1 h-px bg-border/60" />
-              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-widest px-1">color</span>
+              <span className="text-[10px] text-muted-foreground/50 uppercase tracking-widest px-1">color · social</span>
               <div className="flex-1 h-px bg-border/60" />
             </div>
-            <button
-              onClick={() => mp.isHost && setGameMode("colorform")}
-              disabled={!mp.isHost}
-              className={`w-full rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
-                gameMode === "colorform"
-                  ? "border-primary bg-primary/10 text-foreground"
-                  : "border-border text-muted-foreground hover:border-primary/50"
-              }`}
-            >
-              Colorform
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              {(["colorform", "deception"] as const).map((mode) => (
+                <button
+                  key={mode}
+                  onClick={() => mp.isHost && setGameMode(mode)}
+                  disabled={!mp.isHost}
+                  className={`rounded-lg border-2 px-3 py-3 text-sm font-medium transition-colors cursor-pointer disabled:cursor-default ${
+                    gameMode === mode
+                      ? "border-primary bg-primary/10 text-foreground"
+                      : "border-border text-muted-foreground hover:border-primary/50"
+                  }`}
+                >
+                  {mode === "colorform" ? "Colorform" : "Deception"}
+                </button>
+              ))}
+            </div>
           </div>
           {!mp.isHost && (
             <p className="text-xs text-muted-foreground text-center">Only the host can change settings</p>
@@ -497,8 +573,48 @@ export function WaitingRoomView() {
           </div>
         </motion.div>
 
-        {/* Card categories — not applicable in Colorform mode */}
-        {gameMode !== "colorform" && <motion.div variants={item} className="flex flex-col gap-2">
+        {/* Deception-specific settings */}
+        {gameMode === "deception" && (
+          <motion.div variants={item} className="flex flex-col gap-3">
+            <div className="flex flex-col gap-1.5">
+              <Label className="text-xs text-muted-foreground">FS Placement Timer</Label>
+              <Select
+                value={String(deceptionFsTimerDuration)}
+                onValueChange={(v) => setDeceptionFsTimer(Number(v))}
+                disabled={!mp.isHost}
+              >
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {TIMER_OPTIONS.map(({ value, label }) => (
+                    <SelectItem key={value} value={String(value)}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-center justify-between">
+              <Label className="text-xs text-muted-foreground">Enable Accomplice Role</Label>
+              <button
+                onClick={() => mp.isHost && setDeceptionAccomplice(!enableAccomplice)}
+                disabled={!mp.isHost}
+                className={`w-10 h-5 rounded-full transition-colors relative cursor-pointer disabled:cursor-default ${
+                  enableAccomplice ? "bg-primary" : "bg-muted"
+                }`}
+              >
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-background transition-transform ${
+                  enableAccomplice ? "translate-x-5" : "translate-x-0.5"
+                }`} />
+              </button>
+            </div>
+            {enableAccomplice && (
+              <p className="text-xs text-muted-foreground">Requires at least 5 players.</p>
+            )}
+          </motion.div>
+        )}
+
+        {/* Card categories — not applicable in Colorform or Deception mode */}
+        {gameMode !== "colorform" && gameMode !== "deception" && <motion.div variants={item} className="flex flex-col gap-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm text-muted-foreground">Card Categories</Label>
             <span className="text-xs text-muted-foreground">
@@ -614,7 +730,11 @@ export function WaitingRoomView() {
         {mp.isHost ? (
           <motion.div variants={item}>
             <Button className="w-full" onClick={handleStart} disabled={!canStart}>
-              {canStart ? "Start Game" : "Waiting for players…"}
+              {startingDeception
+                ? "Preparing game…"
+                : canStart
+                  ? "Start Game"
+                  : `Waiting for players… (need ${minPlayers})`}
             </Button>
           </motion.div>
         ) : (

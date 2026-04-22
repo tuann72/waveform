@@ -8,15 +8,13 @@ import type { ExtraNeedle } from "@/components/game/SpectrumDial";
 import { SpectrumPlane } from "@/components/game/SpectrumPlane";
 import type { ExtraPoint } from "@/components/game/SpectrumPlane";
 import { EmojiReactions } from "@/components/game/EmojiReactions";
+import { TimerBar } from "@/components/game/TimerBar";
+import { PlayerStatusList } from "@/components/game/PlayerStatusList";
+import type { PlayerStatusEntry } from "@/components/game/PlayerStatusList";
 import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
+import { useCountdown } from "@/hooks/useCountdown";
 import { calcPoints, calcPoints2D, applyDoubleDown } from "@/lib/scoring";
-
-function formatTime(seconds: number): string {
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return m > 0 ? `${m}:${s.toString().padStart(2, "0")}` : `${s}s`;
-}
 
 type GuessMode =
   | { kind: "classic"; playerDials: Record<string, DialConfig[]> }
@@ -48,8 +46,9 @@ export function MultiGuessBase({ mode }: Props) {
   const [position, setPosition] = useState({ x: 50, y: 50 });
   const [resetFor, setResetFor] = useState<number | null>(null);
   const [autoAdvanceTimer, setAutoAdvanceTimer] = useState<number | null>(null);
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
   const [doubleDown, setDoubleDown] = useState(false);
+
+  const timeLeft = useCountdown(guessPhaseStartTime, effectiveTimer, 200);
   const isAdvancing = useRef(false);
   const savedOnExpiryRef = useRef(false);
 
@@ -109,15 +108,6 @@ export function MultiGuessBase({ mode }: Props) {
     isAdvancing.current = false;
     savedOnExpiryRef.current = false;
   }, [currentGuessIndex]);
-
-  // Guess countdown timer
-  useEffect(() => {
-    if (!guessTimerDuration || !guessPhaseStartTime) return;
-    const tick = () => setTimeLeft(Math.max(0, effectiveTimer - Math.floor((Date.now() - guessPhaseStartTime) / 1000)));
-    tick();
-    const interval = setInterval(tick, 200);
-    return () => clearInterval(interval);
-  }, [guessTimerDuration, guessPhaseStartTime, effectiveTimer]);
 
   // Auto-lock-in when guess timer expires
   useEffect(() => {
@@ -201,9 +191,6 @@ export function MultiGuessBase({ mode }: Props) {
   const totalDialRounds = Math.max(...queue.map((e) => e.dialIndex)) + 1;
 
   const timerActive = guessTimerDuration > 0 && guessPhaseStartTime !== null && !allGuessersLocked;
-  const timerPercent = timerActive && timeLeft !== null ? (timeLeft / effectiveTimer) * 100 : 100;
-  const timerBarColor = timerPercent > 30 ? "bg-primary" : timerPercent > 10 ? "bg-amber-500" : "bg-red-500";
-  const timerTextColor = timerPercent <= 10 ? "text-red-500" : timerPercent <= 30 ? "text-amber-500" : "text-foreground";
 
   const guesserLabel = mode.kind === "2d" ? "Place your point" : "Your turn to guess";
   const guessingLabel = mode.kind === "2d" ? "Placing" : "Guessing";
@@ -288,20 +275,7 @@ export function MultiGuessBase({ mode }: Props) {
           </p>
         </div>
 
-        {/* Guess timer bar */}
-        {timerActive && (
-          <div className="flex flex-col gap-1.5">
-            <div className="flex justify-between items-center">
-              <span className="text-xs text-muted-foreground">Time remaining</span>
-              <span className={`text-sm font-mono font-semibold tabular-nums ${timerTextColor}`}>
-                {timeLeft === 0 ? "Time's up!" : formatTime(timeLeft ?? 0)}
-              </span>
-            </div>
-            <div className="h-1.5 w-full rounded-full bg-muted overflow-hidden">
-              <div className={`h-full rounded-full transition-all duration-500 ${timerBarColor}`} style={{ width: `${timerPercent}%` }} />
-            </div>
-          </div>
-        )}
+        {timerActive && <TimerBar timeLeft={timeLeft} duration={effectiveTimer} />}
 
         {/* Clue */}
         <div className="rounded-xl border bg-muted/40 px-6 py-4 text-center">
@@ -314,29 +288,27 @@ export function MultiGuessBase({ mode }: Props) {
 
         {/* Guesser status */}
         {(amIAuthor || amILocked || allGuessersLocked) && (
-          <div className="flex flex-col gap-1">
-            {guessers.map((g) => {
+          <PlayerStatusList
+            myPlayerId={mp.playerId}
+            entries={guessers.map((g): PlayerStatusEntry => {
               const result = guessResults[`${g.id}-${currentEntry.dialIndex}-${currentEntry.authorId}`];
-              return (
-                <div key={g.id} className="flex items-center gap-2 text-xs">
-                  <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: g.color }} />
-                  <span className="text-muted-foreground">{g.name}{g.id === mp.playerId ? " (you)" : ""}</span>
-                  <span className="ml-auto">
-                    {allGuessersLocked && result ? (
-                      <span className="font-semibold text-foreground">
-                        {result.points >= 0 ? "+" : ""}{result.points} pt{Math.abs(result.points) !== 1 ? "s" : ""}
-                        {result.doubleDown && <span className="ml-1 text-amber-400 font-bold text-[10px]">2×</span>}
-                      </span>
-                    ) : !!result ? (
-                      <span className="text-muted-foreground">Locked in</span>
-                    ) : (
-                      <span className="text-muted-foreground">{guessingLabel}<Ellipsis /></span>
-                    )}
+              return {
+                id: g.id,
+                name: g.name,
+                color: g.color,
+                rightNode: allGuessersLocked && result ? (
+                  <span className="font-semibold text-foreground">
+                    {result.points >= 0 ? "+" : ""}{result.points} pt{Math.abs(result.points) !== 1 ? "s" : ""}
+                    {result.doubleDown && <span className="ml-1 text-amber-400 font-bold text-[10px]">2×</span>}
                   </span>
-                </div>
-              );
+                ) : result ? (
+                  <span className="text-muted-foreground">Locked in</span>
+                ) : (
+                  <span className="text-muted-foreground">{guessingLabel}<Ellipsis /></span>
+                ),
+              };
             })}
-          </div>
+          />
         )}
 
         {/* Actions */}

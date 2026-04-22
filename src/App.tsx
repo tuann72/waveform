@@ -16,8 +16,16 @@ import { ColorformResultsView } from "@/views/multiplayer/ColorformResultsView";
 import { Multi2DClueView } from "@/views/multiplayer/Multi2DClueView";
 import { Multi2DGuessView } from "@/views/multiplayer/Multi2DGuessView";
 import { Multi2DResultsView } from "@/views/multiplayer/Multi2DResultsView";
+import { RoleRevealView } from "@/views/deception/RoleRevealView";
+import { FsPlacementView } from "@/views/deception/FsPlacementView";
+import { DiscussionView } from "@/views/deception/DiscussionView";
+import { DeceptionResultsView } from "@/views/deception/DeceptionResultsView";
 
-const ROOM_VIEWS = new Set(["waitingRoom", "multiClue", "multiGuess", "multiResults"]);
+const ROOM_VIEWS = new Set([
+  "waitingRoom",
+  "multiClue", "multiGuess", "multiResults",
+  "deceptionRoleReveal", "deceptionFsPlacement", "deceptionDiscussion", "deceptionResults",
+]);
 
 function postLog(event: 'connect' | 'disconnect', name: string, roomId: string, total: number) {
   fetch('/api/log', {
@@ -124,15 +132,24 @@ function RoomOrchestrator() {
 function RoomNavigator() {
   const { state, goTo } = useGame();
   const phase = useStorage((s) => s?.phase);
+  const gameMode = useStorage((s) => s?.gameMode);
+  const deceptionPhase = useStorage((s) => s?.deceptionPhase);
   const storageLoaded = useStorage((s) => s !== null);
 
   useEffect(() => {
-    if (!storageLoaded || phase == null || state.view !== "waitingRoom") return;
+    if (!storageLoaded || state.view !== "waitingRoom") return;
+    if (gameMode === "deception" && deceptionPhase) {
+      if (deceptionPhase === "role-reveal") goTo("deceptionRoleReveal");
+      else if (deceptionPhase === "fs-placement") goTo("deceptionFsPlacement");
+      else if (deceptionPhase === "discussion") goTo("deceptionDiscussion");
+      else if (deceptionPhase === "results") goTo("deceptionResults");
+      return;
+    }
+    if (phase == null) return;
     if (phase === "clue") goTo("multiClue");
     else if (phase === "guessing") goTo("multiGuess");
     else if (phase === "results") goTo("multiResults");
-    // phase === "lobby" → stay in waitingRoom
-  }, [storageLoaded, phase, goTo, state.view]);
+  }, [storageLoaded, phase, gameMode, deceptionPhase, goTo, state.view]);
 
   return null;
 }
@@ -144,6 +161,13 @@ function InRoomViews() {
   const gameMode = useStorage((s) => s?.gameMode ?? "classic");
 
   if (state.view === "waitingRoom") return <WaitingRoomView />;
+
+  if (gameMode === "deception") {
+    if (state.view === "deceptionRoleReveal") return <RoleRevealView />;
+    if (state.view === "deceptionFsPlacement") return <FsPlacementView />;
+    if (state.view === "deceptionDiscussion") return <DiscussionView />;
+    if (state.view === "deceptionResults") return <DeceptionResultsView />;
+  }
 
   if (gameMode === "colorform") {
     if (state.view === "multiClue") return <ColorformClueView />;
@@ -285,6 +309,24 @@ function MultiplayerRoom() {
         playerColors: new LiveMap(),
         colorOptions: new LiveMap(),
         player2DDials: new LiveMap(),
+        // Deception
+        deceptionPhase: null,
+        deceptionDealtCards: new LiveMap(),
+        deceptionSceneTiles: null,
+        deceptionMarkers: new LiveMap(),
+        deceptionEncryptedRoles: new LiveMap(),
+        deceptionEncryptedRoleMapForHost: null,
+        deceptionEncryptedSolutionForHost: null,
+        deceptionRevealedSolution: null,
+        deceptionRoleAcknowledged: new LiveMap(),
+        deceptionAccusations: new LiveMap(),
+        deceptionCurrentRound: 1,
+        deceptionFsTimerDuration: 120,
+        deceptionFsTimerStart: null,
+        deceptionEnableAccomplice: false,
+        deceptionTilePool: [],
+        deceptionFsHasSwappedThisRound: false,
+        deceptionEliminatedPlayers: new LiveMap(),
       }}
     >
       {!verified ? (

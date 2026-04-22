@@ -38,7 +38,8 @@ export type Presence = {
   reaction: { emoji: string; id: string } | null;
 };
 
-export type GameMode = "classic" | "3d" | "colorform" | "2d";
+export type GameMode = "classic" | "3d" | "colorform" | "2d" | "deception";
+export type DeceptionPhase = "role-reveal" | "fs-placement" | "discussion" | "results";
 
 export type Dial2DConfig = {
   id: string;
@@ -73,6 +74,24 @@ export type Storage = {
   colorOptions: LiveMap<string, number[][]>;  // playerId → [[opt,opt,opt], ...] per round
   // 2D-specific fields
   player2DDials: LiveMap<string, Dial2DConfig[]>;
+  // Deception-specific fields
+  deceptionPhase: DeceptionPhase | null;
+  deceptionDealtCards: LiveMap<string, { meansCards: string[]; evidenceCards: string[] }>;
+  deceptionSceneTiles: Array<{ category: string; options: string[] }> | null;
+  deceptionMarkers: LiveMap<string, number>;            // category → optionIndex (0–5)
+  deceptionEncryptedRoles: LiveMap<string, string>;     // playerId → encrypted DeceptionRoleBlob
+  deceptionEncryptedRoleMapForHost: string | null;      // encrypted DeceptionRoleMapBlob for host
+  deceptionEncryptedSolutionForHost: string | null;     // encrypted MurdererSolution, set by murderer
+  deceptionRevealedSolution: { murdererPlayerId: string; meansCard: string; evidenceCard: string } | null;
+  deceptionRoleAcknowledged: LiveMap<string, boolean>;
+  deceptionAccusations: LiveMap<string, { accusedPlayerId: string; meansCard: string; evidenceCard: string }>;
+  deceptionCurrentRound: number;
+  deceptionFsTimerDuration: number;   // seconds; 0 = no limit
+  deceptionFsTimerStart: number | null;
+  deceptionEnableAccomplice: boolean;
+  deceptionTilePool: Array<{ category: string; options: string[] }>;
+  deceptionFsHasSwappedThisRound: boolean;
+  deceptionEliminatedPlayers: LiveMap<string, boolean>;  // investigators who accused wrongly
 };
 
 // Clears all per-game data from storage. Does NOT touch players, gameMode,
@@ -103,6 +122,30 @@ export function clearGameData(storage: LiveObject<Storage>) {
   for (const k of colorOptions.keys()) colorOptions.delete(k);
   const player2DDials = storage.get("player2DDials");
   for (const k of player2DDials.keys()) player2DDials.delete(k);
+  // Deception
+  storage.set("deceptionPhase", null);
+  storage.set("deceptionSceneTiles", null);
+  storage.set("deceptionEncryptedRoleMapForHost", null);
+  storage.set("deceptionEncryptedSolutionForHost", null);
+  storage.set("deceptionRevealedSolution", null);
+  storage.set("deceptionCurrentRound", 1);
+  storage.set("deceptionFsTimerDuration", 120);
+  storage.set("deceptionFsTimerStart", null);
+  storage.set("deceptionEnableAccomplice", false);
+  const deceptionDealtCards = storage.get("deceptionDealtCards");
+  for (const k of deceptionDealtCards.keys()) deceptionDealtCards.delete(k);
+  const deceptionMarkers = storage.get("deceptionMarkers");
+  for (const k of deceptionMarkers.keys()) deceptionMarkers.delete(k);
+  const deceptionEncryptedRoles = storage.get("deceptionEncryptedRoles");
+  for (const k of deceptionEncryptedRoles.keys()) deceptionEncryptedRoles.delete(k);
+  const deceptionRoleAcknowledged = storage.get("deceptionRoleAcknowledged");
+  for (const k of deceptionRoleAcknowledged.keys()) deceptionRoleAcknowledged.delete(k);
+  const deceptionAccusations = storage.get("deceptionAccusations");
+  for (const k of deceptionAccusations.keys()) deceptionAccusations.delete(k);
+  storage.set("deceptionTilePool", []);
+  storage.set("deceptionFsHasSwappedThisRound", false);
+  const deceptionEliminatedPlayers = storage.get("deceptionEliminatedPlayers");
+  for (const k of deceptionEliminatedPlayers.keys()) deceptionEliminatedPlayers.delete(k);
 }
 
 const client = createClient({

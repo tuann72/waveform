@@ -4,7 +4,11 @@ export type AppView =
   | "waitingRoom"
   | "multiClue"
   | "multiGuess"
-  | "multiResults";
+  | "multiResults"
+  | "deceptionRoleReveal"
+  | "deceptionFsPlacement"
+  | "deceptionDiscussion"
+  | "deceptionResults";
 export const ZONE_WIDTHS = { bullseye: 2, mid: 6, outer: 10 } as const;
 export const ZONE_POINTS = { bullseye: 3, mid: 2, outer: 1, miss: 0 } as const;
 export const DEFAULT_ROUNDS = 3;
