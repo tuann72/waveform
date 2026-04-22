@@ -16,7 +16,7 @@ src/
 ├── types/game.ts              ← AppView, ZONE_WIDTHS/POINTS, GameState, SpectrumCard
 ├── types/deception.ts         ← DeceptionRole, DeceptionPhase, MurdererSolution, blobs
 ├── data/spectrumCards.ts      ← 93 cards, 8 categories
-├── data/deceptionCards.ts     ← 95 means, 286 evidence, 20 scene tiles, 4 location sets
+├── data/deceptionCards.ts     ← 104 means, 215 evidence, 30 scene tiles, 6 location sets
 ├── context/
 │   ├── GameContext.tsx        ← view router (goTo/resetGame)
 │   └── MultiplayerContext.tsx ← sessionStorage state (name, roomCode, playerId, isHost)
@@ -48,7 +48,7 @@ src/
     └── ../deception/
         ├── RoleRevealView.tsx          ← decrypt role; murderer picks solution; readiness gate
         ├── FsPlacementView.tsx         ← marker placement; 1 tile swap per round
-        ├── DiscussionView.tsx          ← accusation form any round; host checks immediately
+        ├── DiscussionView.tsx          ← accusation log + form; wrong vote loses vote, not game
         └── DeceptionResultsView.tsx    ← reveal truth; Play Again resets all
 ```
 
@@ -77,11 +77,13 @@ deceptionEncryptedSolutionForHost: string | null        // written by murderer
 deceptionRevealedSolution:        { murdererPlayerId, meansCard, evidenceCard } | null
 deceptionRoleAcknowledged:        LiveMap<id, boolean>
 deceptionAccusations:             LiveMap<id, { accusedPlayerId, meansCard, evidenceCard }>
-deceptionEliminatedPlayers:       LiveMap<id, boolean>
+deceptionEliminatedPlayers:       LiveMap<id, boolean>   // voted wrong; lose vote but stay active
 deceptionCurrentRound:            number
 deceptionFsTimerDuration:         number    // seconds; 0 = no limit
 deceptionFsTimerStart:            number | null
-deceptionFsHasSwappedThisRound:   boolean
+deceptionDiscussionTimerDuration: number
+deceptionDiscussionTimerStart:    number | null
+deceptionFsRerolledTiles:         number[]  // indices of non-fixed tiles already swapped this round
 deceptionEnableAccomplice:        boolean
 ```
 
@@ -107,9 +109,9 @@ deceptionEnableAccomplice:        boolean
 
 **Role Reveal:** each client decrypts own blob. Murderer picks solution cards → encrypts for host → writes `deceptionEncryptedSolutionForHost` → acknowledges. Others acknowledge directly. Host watches: all acknowledged + solution written → advance to `fs-placement`.
 
-**FS Placement (each round):** FS adjusts markers freely on all 6 tiles. Can swap ONE non-permanent tile (indices 2–5; index 0=Location, 1=Cause of Death are fixed) from the pool per round — `deceptionFsHasSwappedThisRound` prevents a second swap. Timer or "Done" → advance to `discussion`.
+**FS Placement (each round):** FS adjusts markers freely on all 6 tiles. Can swap ONE non-permanent tile (indices 2–5; index 0=Location, 1=Cause of Death are fixed) from the pool per round — `deceptionFsRerolledTiles` tracks which tiles have been swapped this round. Timer or "Done" → advance to `discussion`.
 
-**Discussion (each round):** Any non-eliminated investigator can submit one accusation (one shot total for the game). Host decrypts solution once on mount, watches `deceptionAccusations` via `processedAccusers` ref. Correct → write `deceptionRevealedSolution` + set phase `results`. Wrong → `eliminatePlayer`. All eliminated → murderer wins. Host has "Next Round" (not final) or "End Game — Murderer Escapes" (final round) buttons. `advanceToNextRound` resets `deceptionFsHasSwappedThisRound`, clears accusations, increments round.
+**Discussion (each round):** Any player except the accomplice and FS can submit one accusation (one shot per game — including the murderer as a bluff). All accusations are logged and visible to everyone. Host decrypts solution once on mount, watches `deceptionAccusations` via `processedAccusers` ref. Correct → write `deceptionRevealedSolution` + set phase `results`. Wrong → mark accuser in `deceptionEliminatedPlayers` (they lose their vote but can still use Marker mode). Host has "Next Round" (not final) or "End Game — Murderer Escapes" (final round) buttons. `advanceToNextRound` clears accusations and `deceptionFsRerolledTiles`, increments round.
 
 **Results:** `deceptionRevealedSolution` is always written before phase becomes `results`. Non-hosts watch `deceptionPhase === null` (after host Play Again → `clearGameData`) to navigate back to `waitingRoom`.
 
@@ -151,6 +153,9 @@ Options: 30s / 1 min / 90s / 2 min / No limit (0). All timers timestamp-based �
 - **`Dial2DConfig` type cast:** `as unknown as Record<string, Dial2DConfig[]>` when reading from storage.
 - **Motion `Variants`:** annotate at module level, not inside JSX.
 - **Host navigation guard:** hosts navigate via button only. Non-hosts use `seenLobby` ref (Classic/2D/Colorform) or `RoomNavigator` (Deception).
+- **2D reroll axes independently:** `Multi2DClueView` tracks `rerollsUsedX` / `rerollsUsedY` as separate local state. The `rerollDial2D` mutation accepts `axis: "x" | "y"` and replaces only that axis's cards — `targetX` and `targetY` are always copied from the existing dial unchanged.
+- **SpectrumPlane canvas theming:** Canvas doesn't inherit CSS. Use `getComputedStyle(canvas).color` to read the inherited foreground color at render time, then convert `rgb(…)` → `rgba(…, 0.12)` for axis lines — works in both light and dark mode.
+- **Toggle positioning:** Use explicit `left-*` classes (`left-0.5` / `left-5`) rather than `translate-x-*` for toggle dot anchoring in Tailwind v4 — transforms without an explicit position anchor produce unexpected offsets.
 
 ---
 

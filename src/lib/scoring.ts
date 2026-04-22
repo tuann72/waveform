@@ -8,7 +8,7 @@ export function calcPoints(dial: number, target: number): number {
   return ZONE_POINTS.miss;
 }
 
-export const ZONE_RADII_2D = { bullseye: 4, mid: 12, outer: 16 } as const;
+export const ZONE_RADII_2D = { bullseye: 4, mid: 12, outer: 18 } as const;
 
 export function calcPoints2D(
   x: number,

@@ -650,8 +650,8 @@ export function WaitingRoomView() {
                   enableAccomplice ? "bg-primary" : "bg-muted"
                 }`}
               >
-                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-background transition-transform ${
-                  enableAccomplice ? "translate-x-5" : "translate-x-0.5"
+                <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-background transition-all ${
+                  enableAccomplice ? "left-5" : "left-0.5"
                 }`} />
               </button>
             </div>

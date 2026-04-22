@@ -16,13 +16,13 @@ bun dev
 Each player sees a spectrum dial (e.g. "Hot ↔ Cold") with a hidden target. Write a clue, everyone else drags a needle to guess. Scoring: bullseye 4 pts · mid 3 pts · outer 2 pts · miss 0.
 
 ### 2D
-Each player sees a 2D plane with two spectrum axes. Write one clue covering both axes, others tap a point. Scoring uses Euclidean distance: bullseye (r≤3) 4 pts · mid (r≤8) 3 pts · outer (r≤12) 2 pts. All timers are doubled vs Classic.
+Each player sees a 2D plane with two spectrum axes. Write one clue covering both axes, others tap a point. Scoring uses Euclidean distance: bullseye (r≤3) 4 pts · mid (r≤8) 3 pts · outer (r≤12) 2 pts. All timers are doubled vs Classic. During the clue phase, each player can independently reroll the X axis or Y axis (separate budgets); rerolling an axis replaces only its label cards — the target dot stays fixed.
 
 ### Colorform
 Players receive 3 random color swatches, pick one, write a clue. Others find that color on a 32×16 color wheel grid. Scoring uses Chebyshev distance: exact 3 pts · 1 cell away 2 pts · 2 cells away 1 pt.
 
 ### Deception
-Social deduction. One player is secretly the **Forensic Scientist** (knows the murderer), one is the **Murderer** (picks their weapon + evidence from their dealt cards), optionally one is an **Accomplice** (knows the murderer). Everyone gets 4 means cards + 4 evidence cards dealt face-up. The FS places markers on 6 scene tiles pointing toward the truth — without speaking. Each round investigators discuss, then any investigator can spend their one accusation attempt (wrong = eliminated, correct = investigators win immediately). FS can swap one non-permanent tile per round. Murderer wins if all rounds pass without a correct accusation.
+Social deduction. One player is secretly the **Forensic Scientist** (knows the murderer), one is the **Murderer** (picks their weapon + evidence from their dealt cards), optionally one is an **Accomplice** (knows the murderer). Everyone gets 4 means cards + 4 evidence cards dealt face-up. The FS places markers on 6 scene tiles pointing toward the truth — without speaking. Each round investigators (and the murderer, as a bluff) can spend their one accusation attempt — wrong = lose your vote but remain in the game, correct = investigators win immediately. All accusations are logged and visible to everyone. FS can swap one non-permanent tile per round. Murderer wins if all rounds pass without a correct accusation.
 
 ### Double Down
 Available in Classic and 2D. Guesser bets before locking in — scores double if they land in any zone, loses 2 pts if they miss.
@@ -37,7 +37,7 @@ src/
 │   └── deception.ts           # DeceptionRole, DeceptionPhase, MurdererSolution, etc.
 ├── data/
 │   ├── spectrumCards.ts       # 93 spectrum card pairs across 8 categories
-│   └── deceptionCards.ts      # 95 means cards, 286 evidence cards, 20 scene tiles, 4 location sets
+│   └── deceptionCards.ts      # 104 means cards, 215 evidence cards, 30 scene tiles, 6 location sets
 ├── context/
 │   ├── GameContext.tsx         # view router + totalRounds state
 │   └── MultiplayerContext.tsx  # session-persisted local state (name, roomCode, playerId, isHost)
@@ -101,13 +101,15 @@ deceptionEncryptedRoleMapForHost: string | null       // AES-GCM blob for host
 deceptionEncryptedSolutionForHost: string | null      // AES-GCM blob, written by murderer
 deceptionRevealedSolution:     { murdererPlayerId, meansCard, evidenceCard } | null
 deceptionRoleAcknowledged:     LiveMap<id, boolean>
-deceptionAccusations:          LiveMap<id, { accusedPlayerId, meansCard, evidenceCard }>
-deceptionEliminatedPlayers:    LiveMap<id, boolean>
-deceptionCurrentRound:         number
-deceptionFsTimerDuration:      number   // seconds; 0 = no limit
-deceptionFsTimerStart:         number | null
-deceptionFsHasSwappedThisRound: boolean
-deceptionEnableAccomplice:     boolean
+deceptionAccusations:              LiveMap<id, { accusedPlayerId, meansCard, evidenceCard }>
+deceptionEliminatedPlayers:        LiveMap<id, boolean>   // voted wrong (lose vote, not spectator)
+deceptionCurrentRound:             number
+deceptionFsTimerDuration:          number   // seconds; 0 = no limit
+deceptionFsTimerStart:             number | null
+deceptionDiscussionTimerDuration:  number
+deceptionDiscussionTimerStart:     number | null
+deceptionFsRerolledTiles:          number[]  // indices of non-fixed tiles already swapped this round
+deceptionEnableAccomplice:         boolean
 ```
 
 ## Deception Privacy Model

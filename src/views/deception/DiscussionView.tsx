@@ -295,20 +295,8 @@ export function DiscussionView() {
         endWithInvestigatorsWin(murdererPlayerId, solution);
         return;
       } else {
-        eliminatePlayer(accuserId);
+        eliminatePlayer(accuserId); // marks as voted wrong (can still use marker mode)
       }
-    }
-
-    const investigatorIds = players
-      .map(([id]) => id)
-      .filter((id) =>
-        id !== fsPlayerId &&
-        !(dealtCards[id]?.meansCards.includes(solution.meansCard) &&
-          dealtCards[id]?.evidenceCards.includes(solution.evidenceCard))
-      );
-    const allEliminated = investigatorIds.every((id) => eliminatedPlayers[id] || accusations[id]);
-    if (allEliminated && investigatorIds.length > 0 && Object.keys(accusations).length > 0) {
-      endWithMurdererWins(murdererPlayerId, solution);
     }
   }, [accusations, solution]);
 
@@ -332,15 +320,13 @@ export function DiscussionView() {
     }
   }, [timeLeft]);
 
-  const iAmEliminated = eliminatedPlayers[mp.playerId] === true;
+  const iVotedWrong = eliminatedPlayers[mp.playerId] === true;
   const iHaveAccused = !!accusations[mp.playerId];
   const iAmFs = mp.playerId === fsPlayerId;
   const isFinalRound = currentRound >= totalRounds;
   const canAccuse =
     !iAmFs &&
-    !iAmEliminated &&
     !iHaveAccused &&
-    mp.deceptionRole !== "murderer" &&
     mp.deceptionRole !== "accomplice";
   const accusationValid = !!accusedPlayerId && !!accusedMeans && !!accusedEvidence;
 
@@ -370,9 +356,9 @@ export function DiscussionView() {
           <TimerBar timeLeft={timeLeft} duration={discussionTimerDuration} label="Discussion" />
         )}
 
-        {iAmEliminated && (
-          <div className="rounded-lg border border-destructive/40 bg-destructive/10 px-4 py-3 text-sm text-center text-destructive">
-            Your accusation was wrong. You're eliminated — spectate only.
+        {iVotedWrong && (
+          <div className="rounded-lg border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm text-center text-amber-500">
+            Your accusation was wrong — you may still use Marker mode to help the group.
           </div>
         )}
 
@@ -391,6 +377,52 @@ export function DiscussionView() {
                         ? tile.options[chosen]
                         : <span className="italic text-muted-foreground/50">No marker</span>}
                     </p>
+                  </div>
+                );
+              })}
+            </div>
+          </div>
+        )}
+
+        {/* Accusations log */}
+        {Object.keys(accusations).length > 0 && (
+          <div className="flex flex-col gap-2">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">Accusations Log</p>
+            <div className="flex flex-col gap-2">
+              {Object.entries(accusations).map(([accuserId, acc]) => {
+                const accuser = players.find(([id]) => id === accuserId)?.[1];
+                const suspectName = players.find(([id]) => id === acc.accusedPlayerId)?.[1]?.name ?? "?";
+                const wasWrong = !!eliminatedPlayers[accuserId];
+                return (
+                  <div
+                    key={accuserId}
+                    className={`rounded-lg border px-3 py-2 text-xs flex flex-col gap-1 ${
+                      wasWrong
+                        ? "border-destructive/30 bg-destructive/5"
+                        : "border-border bg-muted/20"
+                    }`}
+                  >
+                    <div className="flex items-center gap-2">
+                      {accuser && (
+                        <span className="w-1.5 h-1.5 rounded-full flex-shrink-0" style={{ background: accuser.color }} />
+                      )}
+                      <span className="font-medium text-foreground">
+                        {accuser?.name ?? "?"}{accuserId === mp.playerId ? " (you)" : ""}
+                      </span>
+                      {wasWrong ? (
+                        <span className="ml-auto text-destructive/70 uppercase tracking-wide text-[10px]">Wrong</span>
+                      ) : (
+                        <span className="ml-auto text-muted-foreground/50 uppercase tracking-wide text-[10px]">Pending</span>
+                      )}
+                    </div>
+                    <div className="text-muted-foreground">
+                      Accused{" "}
+                      <span className="text-foreground font-medium">{suspectName}</span>
+                      {" · "}
+                      <span className="text-foreground">{acc.meansCard}</span>
+                      {" · "}
+                      <span className="text-foreground">{acc.evidenceCard}</span>
+                    </div>
                   </div>
                 );
               })}
@@ -433,14 +465,12 @@ export function DiscussionView() {
                   {orderedPlayers.map(([id, info]) => {
                     const hand = dealtCards[id];
                     if (!hand) return null;
-                    const isEliminated = !!eliminatedPlayers[id];
+                    const hasVotedWrong = !!eliminatedPlayers[id];
                     return (
                       <SortableCard key={id} id={id}>
                         {(dragHandleProps, isDragging) => (
                           <div
-                            className={`rounded-xl border bg-muted/20 px-4 py-3 flex flex-col gap-2 transition-shadow ${
-                              isEliminated ? "opacity-50" : ""
-                            } ${isDragging ? "shadow-lg" : ""}`}
+                            className={`rounded-xl border bg-muted/20 px-4 py-3 flex flex-col gap-2 transition-shadow ${isDragging ? "shadow-lg" : ""}`}
                           >
                             <div className="flex items-center gap-2">
                               <span
@@ -453,8 +483,8 @@ export function DiscussionView() {
                               <span className="text-sm font-medium text-foreground">
                                 {info.name}{id === mp.playerId ? " (you)" : ""}
                               </span>
-                              {isEliminated && (
-                                <span className="ml-auto text-[10px] text-destructive/70 uppercase tracking-wide">eliminated</span>
+                              {hasVotedWrong && (
+                                <span className="ml-auto text-[10px] text-amber-500/70 uppercase tracking-wide">wrong vote</span>
                               )}
                             </div>
                             <div className="grid grid-cols-2 gap-2">
@@ -501,17 +531,15 @@ export function DiscussionView() {
               {orderedPlayers.map(([id, info]) => {
                 const hand = dealtCards[id];
                 if (!hand) return null;
-                const isEliminated = !!eliminatedPlayers[id];
+                const hasVotedWrong = !!eliminatedPlayers[id];
                 const isSelected = accusedPlayerId === id;
-                const isSelectablePlayer = canAccuse && !isEliminated && id !== fsPlayerId;
+                const isSelectablePlayer = canAccuse && id !== fsPlayerId;
 
                 return (
                   <div
                     key={id}
                     onClick={() => isSelectablePlayer && selectPlayerForAccusation(id)}
                     className={`rounded-xl border px-4 py-3 flex flex-col gap-2 transition-all ${
-                      isEliminated ? "opacity-50" : ""
-                    } ${
                       isSelected
                         ? "border-primary bg-primary/5 ring-1 ring-primary/20"
                         : isSelectablePlayer
@@ -521,11 +549,11 @@ export function DiscussionView() {
                   >
                     <div className="flex items-center gap-2">
                       <span className="w-2 h-2 rounded-full flex-shrink-0" style={{ background: info.color }} />
-                      <span className={`text-sm font-medium ${isSelected ? "text-foreground" : "text-foreground"}`}>
+                      <span className="text-sm font-medium text-foreground">
                         {info.name}{id === mp.playerId ? " (you)" : ""}
                       </span>
-                      {isEliminated && (
-                        <span className="ml-auto text-[10px] text-destructive/70 uppercase tracking-wide">eliminated</span>
+                      {hasVotedWrong && !isSelected && (
+                        <span className="ml-auto text-[10px] text-amber-500/70 uppercase tracking-wide">wrong vote</span>
                       )}
                       {isSelected && (
                         <span className="ml-auto text-[10px] text-primary uppercase tracking-wide font-medium">Suspect ✓</span>
@@ -582,9 +610,11 @@ export function DiscussionView() {
         )}
 
         {/* Accusation submitted banner */}
-        {!iAmFs && iHaveAccused && !iAmEliminated && (
-          <div className="rounded-xl border bg-muted/30 px-4 py-3 text-sm">
-            <p className="text-muted-foreground mb-1">Your accusation — waiting for verdict</p>
+        {!iAmFs && iHaveAccused && (
+          <div className={`rounded-xl border px-4 py-3 text-sm ${iVotedWrong ? "border-destructive/30 bg-destructive/5" : "bg-muted/30"}`}>
+            <p className="text-muted-foreground mb-1">
+              {iVotedWrong ? "Your accusation was wrong" : "Your accusation — waiting for verdict"}
+            </p>
             <p className="font-medium">
               {players.find(([id]) => id === accusations[mp.playerId].accusedPlayerId)?.[1].name ?? "?"}
               {" · "}{accusations[mp.playerId].meansCard}
@@ -602,11 +632,11 @@ export function DiscussionView() {
             color: info.color,
             rightNode: id === fsPlayerId
               ? <span className="text-blue-400 text-xs">Forensic Scientist</span>
-              : eliminatedPlayers[id]
-                ? <span className="text-destructive/70 text-xs">Eliminated</span>
-                : accusations[id]
-                  ? <DoneNode label="Accused" />
-                  : <WaitingNode label="Thinking" />,
+              : accusations[id]
+                ? eliminatedPlayers[id]
+                  ? <span className="text-amber-500/80 text-xs">Wrong vote</span>
+                  : <DoneNode label="Voted" />
+                : <WaitingNode label="Thinking" />,
           }))}
         />
 

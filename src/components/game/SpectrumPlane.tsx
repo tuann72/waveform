@@ -41,8 +41,12 @@ export function SpectrumPlane({
 
     ctx.clearRect(0, 0, CANVAS_SIZE, CANVAS_SIZE)
 
-    // Subtle center axis lines
-    ctx.strokeStyle = "rgba(255,255,255,0.07)"
+    // Subtle center axis lines — use computed foreground color so it works in both themes
+    const fg = getComputedStyle(canvas).color || "rgb(0,0,0)"
+    const axisColor = fg.startsWith("rgba")
+      ? fg.replace(/,\s*[\d.]+\)$/, ", 0.12)")
+      : fg.replace("rgb(", "rgba(").replace(")", ", 0.12)")
+    ctx.strokeStyle = axisColor
     ctx.lineWidth = 1
     ctx.beginPath()
     ctx.moveTo(CANVAS_SIZE / 2, 0)

@@ -72,7 +72,8 @@ export function Multi2DClueView() {
   const [currentDial, setCurrentDial] = useState(0)
   const [cluesInitializedFor, setCluesInitializedFor] = useState(0)
   const [hasSubmitted, setHasSubmitted] = useState(false)
-  const [rerollsUsed, setRerollsUsed] = useState(0)
+  const [rerollsUsedX, setRerollsUsedX] = useState(0)
+  const [rerollsUsedY, setRerollsUsedY] = useState(0)
   const [timeLeft, setTimeLeft] = useState<number | null>(null)
   const maxRerolls = Math.ceil(totalRounds / 2)
   const savedOnExpiryRef = useRef(false)
@@ -133,7 +134,7 @@ export function Multi2DClueView() {
     }
   }, [])
 
-  const rerollDial2D = useMutation(({ storage }, playerId: string, roundIndex: number, categories: string[]) => {
+  const rerollDial2D = useMutation(({ storage }, playerId: string, roundIndex: number, categories: string[], axis: "x" | "y") => {
     const pd = storage.get("player2DDials")
     const current = pd.get(playerId) ?? []
     const usedIds = new Set(current.flatMap(d => d.id.split("|")))
@@ -141,18 +142,32 @@ export function Multi2DClueView() {
       ? spectrumCards.filter(c => c.category && categories.includes(c.category))
       : spectrumCards
     const available = shuffle(pool.filter(c => !usedIds.has(c.id)))
-    const src = available.length >= 2 ? available : shuffle([...pool])
-    const h = src[0]
-    const v = src[1] ?? src[0]
+    const src = available.length >= 1 ? available : shuffle([...pool])
+    const existing = current[roundIndex]
+    const [existingHId, existingVId] = existing.id.split("|")
     const newDials = [...current]
-    newDials[roundIndex] = {
-      id: `${h.id}|${v.id}`,
-      left: h.left,
-      right: h.right,
-      bottom: v.left,
-      top: v.right,
-      targetX: Math.random() * 86 + 7,
-      targetY: Math.random() * 86 + 7,
+    if (axis === "x") {
+      const h = src[0]
+      newDials[roundIndex] = {
+        id: `${h.id}|${existingVId}`,
+        left: h.left,
+        right: h.right,
+        bottom: existing.bottom,
+        top: existing.top,
+        targetX: existing.targetX,
+        targetY: existing.targetY,
+      }
+    } else {
+      const v = src[0]
+      newDials[roundIndex] = {
+        id: `${existingHId}|${v.id}`,
+        left: existing.left,
+        right: existing.right,
+        bottom: v.left,
+        top: v.right,
+        targetX: existing.targetX,
+        targetY: existing.targetY,
+      }
     }
     pd.set(playerId, newDials)
   }, [])
@@ -200,12 +215,13 @@ export function Multi2DClueView() {
     updatePresence({ cluesComplete: true })
   }
 
-  function handleReroll() {
+  function handleReroll(axis: "x" | "y") {
     const next = [...clues]
     next[currentDial] = ""
     setClues(next)
-    setRerollsUsed(n => n + 1)
-    rerollDial2D(mp.playerId, currentDial, selectedCategories)
+    if (axis === "x") setRerollsUsedX(n => n + 1)
+    else setRerollsUsedY(n => n + 1)
+    rerollDial2D(mp.playerId, currentDial, selectedCategories, axis)
   }
 
   function handleUnlock() {
@@ -298,13 +314,26 @@ export function Multi2DClueView() {
           hidePoint={true}
         />
 
-        {/* Reroll button */}
+        {/* Reroll buttons */}
         {!myCluesSubmitted && (
-          <div className="flex justify-end">
-            <Button variant="outline" size="sm" disabled={rerollsUsed >= maxRerolls} onClick={handleReroll} className="text-xs">
-              {rerollsUsed >= maxRerolls
-                ? "No Rerolls Left"
-                : `Reroll Both Axes (${maxRerolls - rerollsUsed} left)`}
+          <div className="flex gap-2 justify-end">
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={rerollsUsedX >= maxRerolls}
+              onClick={() => handleReroll("x")}
+              className="text-xs"
+            >
+              {rerollsUsedX >= maxRerolls ? "X Used Up" : `Reroll X (${maxRerolls - rerollsUsedX} left)`}
+            </Button>
+            <Button
+              variant="outline"
+              size="sm"
+              disabled={rerollsUsedY >= maxRerolls}
+              onClick={() => handleReroll("y")}
+              className="text-xs"
+            >
+              {rerollsUsedY >= maxRerolls ? "Y Used Up" : `Reroll Y (${maxRerolls - rerollsUsedY} left)`}
             </Button>
           </div>
         )}
