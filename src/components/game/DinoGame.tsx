@@ -11,10 +11,10 @@ const DINO_DUCK_W = 19;
 const DINO_DUCK_H = 10;
 const BIRD_W = 16;
 const BIRD_H = 7;
-const GRAVITY = 0.15;
-const JUMP_VEL = -5;
-const BASE_SPEED = 0.5;
-const MAX_SPEED = 5;
+const GRAVITY = 0.65;
+const JUMP_VEL = -12;
+const BASE_SPEED = 3.5;
+const MAX_SPEED = 9;
 
 interface Cactus {
   kind: "cactus";
@@ -221,7 +221,18 @@ export function DinoGame({ height = 160 }: Props) {
       }
     }
 
-    function tick() {
+    const TARGET_FPS = 60;
+    const FRAME_MS = 1000 / TARGET_FPS;
+    let lastTime = 0;
+
+    function tick(now: number) {
+      const elapsed = now - lastTime;
+      if (elapsed < FRAME_MS * 0.75) {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
+      lastTime = now - (elapsed % FRAME_MS);
+
       const st = s.current;
 
       if (st.phase === "playing" && !isPaused.current) {
@@ -235,7 +246,7 @@ export function DinoGame({ height = 160 }: Props) {
           st.onGround = true;
         }
 
-        st.speed = Math.min(MAX_SPEED, BASE_SPEED + st.frame * 0.0007);
+        st.speed = Math.min(MAX_SPEED, BASE_SPEED + st.frame * 0.005);
         st.frame++;
         st.score += st.speed * 0.045;
 
@@ -313,7 +324,7 @@ export function DinoGame({ height = 160 }: Props) {
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [height, groundY, birdLowY, birdHighY]);
+  }, [height, groundY, birdLowY, birdHighY, collapsed]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowUp") {
