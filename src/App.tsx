@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { LiveList, LiveMap } from "@liveblocks/client";
 import { ThemeProvider } from "@/components/theme-provider";
+import { MuteProvider } from "@/context/MuteContext";
+import { GlobalControls } from "@/components/GlobalControls";
 import { GameProvider, useGame } from "@/context/GameContext";
 import { MultiplayerProvider, useMultiplayer, getRoomId } from "@/context/MultiplayerContext";
 import { RoomProvider, useStorage, useMutation, useOthers } from "@/lib/liveblocks";
@@ -366,11 +368,14 @@ function GameRouter() {
 function App() {
   return (
     <ThemeProvider defaultTheme="system" storageKey="vite-ui-theme">
-      <GameProvider>
-        <MultiplayerProvider>
-          <GameRouter />
-        </MultiplayerProvider>
-      </GameProvider>
+      <MuteProvider>
+        <GlobalControls />
+        <GameProvider>
+          <MultiplayerProvider>
+            <GameRouter />
+          </MultiplayerProvider>
+        </GameProvider>
+      </MuteProvider>
     </ThemeProvider>
   );
 }

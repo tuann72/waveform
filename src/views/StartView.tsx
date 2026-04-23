@@ -1,5 +1,4 @@
 import { useEffect, useState } from "react";
-import { Moon, Sun } from "lucide-react";
 import { useGame } from "@/context/GameContext";
 import { useTheme } from "@/components/theme-context";
 import { Button } from "@/components/ui/button";
@@ -10,7 +9,6 @@ function useResolvedTheme(): "light" | "dark" {
   const [systemDark, setSystemDark] = useState(() =>
     window.matchMedia("(prefers-color-scheme: dark)").matches
   );
-
   useEffect(() => {
     if (theme !== "system") return;
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
@@ -18,33 +16,16 @@ function useResolvedTheme(): "light" | "dark" {
     mq.addEventListener("change", handler);
     return () => mq.removeEventListener("change", handler);
   }, [theme]);
-
-  if (theme !== "system") return theme;
-  return systemDark ? "dark" : "light";
+  return theme === "system" ? (systemDark ? "dark" : "light") : theme;
 }
-
 
 export function StartView() {
   const { goTo } = useGame();
-  const { setTheme } = useTheme();
   const resolved = useResolvedTheme();
-  function toggleTheme() {
-    setTheme(resolved === "dark" ? "light" : "dark");
-  }
 
   return (
     <div className="relative min-h-screen flex flex-col items-center justify-center gap-8 px-4 overflow-hidden">
-      {/* Wave WebGL background */}
       <WaveBackground isDark={resolved === "dark"} />
-
-      {/* Theme toggle */}
-      <button
-        onClick={toggleTheme}
-        aria-label="Toggle theme"
-        className="absolute top-4 right-4 p-2 rounded-full bg-white/10 hover:bg-white/20 transition-colors text-white cursor-pointer z-10"
-      >
-        {resolved === "dark" ? <Moon size={18} /> : <Sun size={18} />}
-      </button>
 
       {/* Content sits above the canvas */}
       <div className="relative z-10 flex flex-col items-center gap-3 text-center">

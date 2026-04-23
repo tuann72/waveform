@@ -10,7 +10,8 @@ import { Separator } from "@/components/ui/separator";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import type { DeceptionRoleBlob, MurdererSolution } from "@/types/deception";
 
-const PERMANENT_INDICES = new Set([0, 1, 2]); // Location, Cause of Death, Evidence Left Behind
+const PERMANENT_INDICES = new Set([0, 1]); // Location, Cause of Death
+const LOCKED_INDICES = new Set([2]);       // one random tile per game that cannot be rerolled
 
 export function FsPlacementView() {
   const { mp } = useMultiplayer();
@@ -139,7 +140,11 @@ export function FsPlacementView() {
     );
   }
 
-  const canReroll = (tileIndex: number) => isFs && !rerolledTiles.includes(tileIndex) && tilePool.length > 0;
+  const canReroll = (tileIndex: number) =>
+    isFs &&
+    !LOCKED_INDICES.has(tileIndex) &&
+    !rerolledTiles.includes(tileIndex) &&
+    tilePool.length > 0;
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start bg-background px-4 py-8 overflow-y-auto">
@@ -174,8 +179,9 @@ export function FsPlacementView() {
                   <p className="text-xs uppercase tracking-widest text-muted-foreground">
                     {tile.category}
                     {isPermanent && <span className="ml-1.5 text-muted-foreground/50">·fixed</span>}
+                    {!isPermanent && LOCKED_INDICES.has(tileIndex) && <span className="ml-1.5 text-muted-foreground/50">·locked</span>}
                   </p>
-                  {isFs && !isPermanent && (
+                  {isFs && !isPermanent && !LOCKED_INDICES.has(tileIndex) && (
                     rerolledTiles.includes(tileIndex) ? (
                       <div className="flex items-center gap-2">
                         <span className="text-[10px] text-muted-foreground/40">rerolled</span>

@@ -327,6 +327,13 @@ export function WaitingRoomView() {
     storage.get("players").delete(kickId);
   }, []);
 
+  const kickAllPlayers = useMutation(({ storage }) => {
+    const players = storage.get("players");
+    for (const [id, info] of players.entries()) {
+      if (!info.isHost) players.delete(id);
+    }
+  }, []);
+
   const updatePlayerColor = useMutation(({ storage }, id: string, color: string) => {
     const p = storage.get("players").get(id);
     if (p) storage.get("players").set(id, { ...p, color });
@@ -778,6 +785,14 @@ export function WaitingRoomView() {
           )}
           {!mp.isHost && playerCount >= MAX_PLAYERS && !players?.find(([id]) => id === mp.playerId) && (
             <p className="text-xs text-destructive mt-1">Room is full (max {MAX_PLAYERS} players).</p>
+          )}
+          {mp.isHost && playerCount > 1 && (
+            <button
+              onClick={kickAllPlayers}
+              className="mt-1 text-xs text-muted-foreground/50 hover:text-destructive transition-colors cursor-pointer text-left"
+            >
+              Kick all
+            </button>
           )}
         </motion.div>
 

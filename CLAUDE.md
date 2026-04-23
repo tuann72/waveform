@@ -16,10 +16,11 @@ src/
 ├── types/game.ts              ← AppView, ZONE_WIDTHS/POINTS, GameState, SpectrumCard
 ├── types/deception.ts         ← DeceptionRole, DeceptionPhase, MurdererSolution, blobs
 ├── data/spectrumCards.ts      ← 93 cards, 8 categories
-├── data/deceptionCards.ts     ← 104 means, 215 evidence, 30 scene tiles, 6 location sets
+├── data/deceptionCards.ts     ← 95 means, 286 evidence, 20 scene tiles, 4 location sets
 ├── context/
 │   ├── GameContext.tsx        ← view router (goTo/resetGame)
-│   └── MultiplayerContext.tsx ← sessionStorage state (name, roomCode, playerId, isHost)
+│   ├── MultiplayerContext.tsx ← sessionStorage state (name, roomCode, playerId, isHost)
+│   └── MuteContext.tsx        ← global mute toggle; persists to localStorage
 ├── hooks/
 │   ├── useDialDrag.ts         ← pointer-capture drag
 │   ├── useLeaveRoom.ts        ← shared leave logic (WaitingRoom + Results)
@@ -31,15 +32,18 @@ src/
 │   ├── colorPalette.ts        ← 512-color wheel, chebyshevDistance, calcColorPoints
 │   ├── scoring.ts             ← calcPoints, calcPoints2D, applyDoubleDown
 │   └── utils.ts               ← cn() helper
-├── components/game/
-│   ├── SpectrumDial.tsx       ← 1D dial; extraNeedles prop
-│   ├── SpectrumPlane.tsx      ← Canvas 2D plane; extraPoints prop; 400×400 internal
-│   ├── ColorGrid.tsx          ← 32×16 swatch grid; Chebyshev zone borders
-│   ├── TimerBar.tsx           ← shared timer bar (green→amber→red); props: timeLeft, duration
-│   ├── PlayerStatusList.tsx   ← shared player status rows; DoneNode/WaitingNode helpers
-│   ├── MultiGuessBase.tsx     ← shared Classic+2D guess logic (mode discriminated union)
-│   ├── ResultsView.tsx        ← shared results layout for Classic/2D/Colorform (render props)
-│   └── EmojiReactions.tsx     ← hamster reactions; floating animation
+├── components/
+│   ├── GlobalControls.tsx     ← fixed top-right pill: mute + theme toggle (all screens)
+│   └── game/
+│       ├── SpectrumDial.tsx       ← 1D dial; extraNeedles prop
+│       ├── SpectrumPlane.tsx      ← Canvas 2D plane; extraPoints prop; 400×400 internal
+│       ├── ColorGrid.tsx          ← 32×16 swatch grid; Chebyshev zone borders
+│       ├── TimerBar.tsx           ← shared timer bar (green→amber→red); props: timeLeft, duration
+│       ├── PlayerStatusList.tsx   ← shared player status rows; DoneNode/WaitingNode helpers
+│       ├── MultiGuessBase.tsx     ← shared Classic+2D guess logic (mode discriminated union)
+│       ├── ResultsView.tsx        ← shared results layout for Classic/2D/Colorform (render props)
+│       ├── DinoGame.tsx           ← canvas runner mini-game; collapsible; shown while waiting
+│       └── EmojiReactions.tsx     ← hamster reactions; floating animation
 └── views/multiplayer/
     ├── WaitingRoomView.tsx    ← lobby; all mode settings; async handleStartDeception
     ├── MultiClueView.tsx / MultiGuessView.tsx / MultiResultsView.tsx
@@ -47,9 +51,8 @@ src/
     ├── ColorformClueView.tsx / ColorformGuessView.tsx / ColorformResultsView.tsx
     └── ../deception/
         ├── RoleRevealView.tsx          ← decrypt role; murderer picks solution; readiness gate
-        ├── FsPlacementView.tsx         ← marker placement; 1 tile swap per round
-        ├── DiscussionView.tsx          ← accusation log + form; wrong vote loses vote, not game
-        └── DeceptionResultsView.tsx    ← reveal truth; Play Again resets all
+        ├── FsPlacementView.tsx         ← marker placement; 1 tile swap per round; undo support
+        └── DiscussionView.tsx          ← accusation log + form; results screen inline when phase="results"
 ```
 
 ---
@@ -74,6 +77,8 @@ deceptionMarkers:                 LiveMap<category, optionIndex>
 deceptionEncryptedRoles:          LiveMap<id, string>   // per-player AES-GCM blob
 deceptionEncryptedRoleMapForHost: string | null
 deceptionEncryptedSolutionForHost: string | null        // written by murderer
+deceptionEncryptedSolutionForFs:  string | null         // same solution, encrypted for FS
+deceptionFsPlayerId:              string | null         // public: who the forensic scientist is
 deceptionRevealedSolution:        { murdererPlayerId, meansCard, evidenceCard } | null
 deceptionRoleAcknowledged:        LiveMap<id, boolean>
 deceptionAccusations:             LiveMap<id, { accusedPlayerId, meansCard, evidenceCard }>
@@ -97,9 +102,11 @@ deceptionEnableAccomplice:        boolean
 
 **`InRoomViews`** — checks `gameMode` first, routes deception views before falling through to other modes.
 
-**`RoomNavigator`** — on mount with `state.view === "waitingRoom"`: checks `gameMode === "deception"` + `deceptionPhase` first, then falls back to existing `phase`-based redirect for other modes.
+**`RoomNavigator`** — on mount with `state.view === "waitingRoom"`: checks `gameMode === "deception"` + `deceptionPhase` first, then falls back to existing `phase`-based redirect for other modes. `deceptionPhase === "results"` routes to `deceptionDiscussion` (results are inline).
 
 **`initialStorage`** — must include all deception LiveMap fields initialized as `new LiveMap()` and scalar fields with defaults.
+
+**`GlobalControls`** — fixed top-right pill with mute + theme toggle. Rendered outside `GameRouter` so it appears on every screen. `MuteProvider` wraps the whole app; state persists to `localStorage`.
 
 ---
 
@@ -107,13 +114,13 @@ deceptionEnableAccomplice:        boolean
 
 **WaitingRoom → start:** host calls async `handleStartDeception()` → assigns roles, deals cards, draws 6 scene tiles + tile pool, encrypts role blob per player (AES-GCM, key = `PBKDF2(roomCode + playerId)`), encrypts role map + solution slot for host → calls `startDeceptionGame` mutation → `goTo("deceptionRoleReveal")`.
 
-**Role Reveal:** each client decrypts own blob. Murderer picks solution cards → encrypts for host → writes `deceptionEncryptedSolutionForHost` → acknowledges. Others acknowledge directly. Host watches: all acknowledged + solution written → advance to `fs-placement`.
+**Role Reveal:** each client decrypts own blob. Murderer picks solution cards → encrypts for host AND for FS → writes `deceptionEncryptedSolutionForHost` + `deceptionEncryptedSolutionForFs` → acknowledges. Others acknowledge directly. Host watches: all acknowledged + solution written → advance to `fs-placement`.
 
-**FS Placement (each round):** FS adjusts markers freely on all 6 tiles. Can swap ONE non-permanent tile (indices 2–5; index 0=Location, 1=Cause of Death are fixed) from the pool per round — `deceptionFsRerolledTiles` tracks which tiles have been swapped this round. Timer or "Done" → advance to `discussion`.
+**FS Placement (each round):** FS adjusts markers freely on all 6 tiles. Can swap ONE non-permanent tile (indices 2–5; index 0=Location, 1=Cause of Death are fixed) from the pool per round — `deceptionFsRerolledTiles` tracks which tiles have been swapped this round. After reroll, an **undo** button appears (local state only; does not restore the reroll allowance). Timer or "Done" → advance to `discussion`.
 
-**Discussion (each round):** Any player except the accomplice and FS can submit one accusation (one shot per game — including the murderer as a bluff). All accusations are logged and visible to everyone. Host decrypts solution once on mount, watches `deceptionAccusations` via `processedAccusers` ref. Correct → write `deceptionRevealedSolution` + set phase `results`. Wrong → mark accuser in `deceptionEliminatedPlayers` (they lose their vote but can still use Marker mode). Host has "Next Round" (not final) or "End Game — Murderer Escapes" (final round) buttons. `advanceToNextRound` clears accusations and `deceptionFsRerolledTiles`, increments round.
+**Discussion (each round):** Any non-FS, non-accomplice player can submit one accusation (one shot total for the game — including the murderer as a bluff). Host decrypts solution + role map once on mount. Correct accusation → `endWithInvestigatorsWin`. Wrong → `eliminatePlayer`. If all eligible accusers (non-FS, non-accomplice) are eliminated → `endWithMurdererWins` fires automatically. Host has "Next Round" (not final) or "End Game — Murderer Escapes" (final round) buttons. `advanceToNextRound` clears accusations and `deceptionFsRerolledTiles`, increments round. DinoGame shown to players who have voted or cannot vote.
 
-**Results:** `deceptionRevealedSolution` is always written before phase becomes `results`. Non-hosts watch `deceptionPhase === null` (after host Play Again → `clearGameData`) to navigate back to `waitingRoom`.
+**Results (inline in DiscussionView):** When `phase === "results"` and `revealedSolution` is set, `DiscussionView` renders the results screen directly — no separate view or navigation. Host clicks "Play Again" → `clearGameData` → `goTo("waitingRoom")`. Non-hosts watch `deceptionPhase === null` to navigate back. There is no `DeceptionResultsView`.
 
 ---
 
@@ -131,6 +138,12 @@ Used in: MultiGuessBase, MultiClueView, FsPlacementView.
 <PlayerStatusList myPlayerId={id} entries={[{ id, name, color, rightNode }]} />
 ```
 `DoneNode` / `WaitingNode` for common right-side states. Used in: MultiGuessBase, RoleRevealView, DiscussionView.
+
+### `DinoGame`
+```tsx
+<DinoGame height={130} />
+```
+Canvas runner mini-game. Collapsible via "while you wait ▾/▸" toggle. Shown while waiting in: MultiClueView, Multi2DClueView, MultiGuessBase, DiscussionView. Dark mode aware (reads `document.documentElement.classList`).
 
 ---
 
@@ -153,9 +166,9 @@ Options: 30s / 1 min / 90s / 2 min / No limit (0). All timers timestamp-based �
 - **`Dial2DConfig` type cast:** `as unknown as Record<string, Dial2DConfig[]>` when reading from storage.
 - **Motion `Variants`:** annotate at module level, not inside JSX.
 - **Host navigation guard:** hosts navigate via button only. Non-hosts use `seenLobby` ref (Classic/2D/Colorform) or `RoomNavigator` (Deception).
-- **2D reroll axes independently:** `Multi2DClueView` tracks `rerollsUsedX` / `rerollsUsedY` as separate local state. The `rerollDial2D` mutation accepts `axis: "x" | "y"` and replaces only that axis's cards — `targetX` and `targetY` are always copied from the existing dial unchanged.
-- **SpectrumPlane canvas theming:** Canvas doesn't inherit CSS. Use `getComputedStyle(canvas).color` to read the inherited foreground color at render time, then convert `rgb(…)` → `rgba(…, 0.12)` for axis lines — works in both light and dark mode.
-- **Toggle positioning:** Use explicit `left-*` classes (`left-0.5` / `left-5`) rather than `translate-x-*` for toggle dot anchoring in Tailwind v4 — transforms without an explicit position anchor produce unexpected offsets.
+- **Deception results inline:** `DiscussionView` renders results when `phase === "results"`. `RoomNavigator` routes `phase === "results"` to `deceptionDiscussion`. No separate results view exists.
+- **Unique player colors:** `registerPlayer` picks the first unused color from `PLAYER_COLORS`; host always gets index 0.
+- **MuteContext:** `useMute()` returns `{ muted, toggleMute }`. Gate any audio behind `!muted`. State persists to `localStorage` as `wf-muted`.
 
 ---
 

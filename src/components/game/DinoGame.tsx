@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 
 const W = 320;
 const DINO_X = 42;
@@ -235,7 +235,7 @@ export function DinoGame({ height = 160 }: Props) {
           st.onGround = true;
         }
 
-        st.speed = Math.min(MAX_SPEED, BASE_SPEED + st.frame * 0.0015);
+        st.speed = Math.min(MAX_SPEED, BASE_SPEED + st.frame * 0.0007);
         st.frame++;
         st.score += st.speed * 0.045;
 
@@ -356,31 +356,38 @@ export function DinoGame({ height = 160 }: Props) {
     }
   }
 
+  const [collapsed, setCollapsed] = useState(false);
+
   return (
     <div className="flex flex-col gap-1.5">
-      <p className="text-xs text-muted-foreground text-center">
-        while you wait
-      </p>
-      <div
-        className="rounded-lg border overflow-hidden select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground bg-background"
-        style={{ touchAction: "none", cursor: "pointer" }}
-        onMouseMove={handleMouseMove}
-        onPointerDown={handlePointerDown}
-        onPointerUp={stopDuck}
-        onPointerLeave={stopDuck}
-        onKeyDown={handleKeyDown}
-        onKeyUp={handleKeyUp}
-        tabIndex={0}
-        role="button"
-        aria-label="Dino runner mini-game"
+      <button
+        onClick={() => setCollapsed((v) => !v)}
+        className="text-xs text-muted-foreground/60 hover:text-muted-foreground transition-colors text-center cursor-pointer"
       >
-        <canvas
-          ref={canvasRef}
-          width={W}
-          height={height}
-          className="w-full block"
-        />
-      </div>
+        while you wait {collapsed ? "▸" : "▾"}
+      </button>
+      {!collapsed && (
+        <div
+          className="rounded-lg border overflow-hidden select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground bg-background"
+          style={{ touchAction: "none", cursor: "pointer" }}
+          onMouseMove={handleMouseMove}
+          onPointerDown={handlePointerDown}
+          onPointerUp={stopDuck}
+          onPointerLeave={stopDuck}
+          onKeyDown={handleKeyDown}
+          onKeyUp={handleKeyUp}
+          tabIndex={0}
+          role="button"
+          aria-label="Dino runner mini-game"
+        >
+          <canvas
+            ref={canvasRef}
+            width={W}
+            height={height}
+            className="w-full block"
+          />
+        </div>
+      )}
     </div>
   );
 }
