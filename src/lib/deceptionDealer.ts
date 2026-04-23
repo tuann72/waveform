@@ -54,14 +54,17 @@ export function drawSceneTiles(): {
   const locationTile: SceneTileEntry = { category: "Location", options: locationSet };
 
   const causeOfDeath = SCENE_TILES.find((t) => t.category === "Cause of Death")!;
-  const remaining = shuffle(SCENE_TILES.filter((t) => t.category !== "Cause of Death"));
+  const evidenceLeftBehind = SCENE_TILES.find((t) => t.category === "Evidence Left Behind")!;
+  const remaining = shuffle(
+    SCENE_TILES.filter((t) => t.category !== "Cause of Death" && t.category !== "Evidence Left Behind")
+  );
 
-  // First 4 go into the scene, the rest stay in the pool for future swaps
-  const active = remaining.slice(0, 4);
-  const pool = remaining.slice(4).map((t) => ({ category: t.category, options: [...t.options] }));
+  // First 3 go into the scene, the rest stay in the pool for future swaps
+  const active = remaining.slice(0, 3);
+  const pool = remaining.slice(3).map((t) => ({ category: t.category, options: [...t.options] }));
 
   return {
-    tiles: [locationTile, causeOfDeath, ...active],
+    tiles: [locationTile, causeOfDeath, evidenceLeftBehind, ...active],
     pool,
   };
 }

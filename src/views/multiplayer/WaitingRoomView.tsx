@@ -247,8 +247,9 @@ export function WaitingRoomView() {
       const players = storage.get("players");
       if (players.has(id)) return; // already registered (returning after play again)
       if (players.size >= MAX_PLAYERS) return;
-      const colorIndex = players.size % PLAYER_COLORS.length;
-      players.set(id, { name, isHost: false, color: PLAYER_COLORS[colorIndex] });
+      const usedColors = new Set(Array.from(players.values()).map((p: any) => p.color));
+      const availableColor = PLAYER_COLORS.find((c) => !usedColors.has(c)) ?? PLAYER_COLORS[players.size % PLAYER_COLORS.length];
+      players.set(id, { name, isHost: false, color: availableColor });
     },
     [],
   );

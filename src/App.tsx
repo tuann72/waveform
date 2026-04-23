@@ -19,12 +19,10 @@ import { Multi2DResultsView } from "@/views/multiplayer/Multi2DResultsView";
 import { RoleRevealView } from "@/views/deception/RoleRevealView";
 import { FsPlacementView } from "@/views/deception/FsPlacementView";
 import { DiscussionView } from "@/views/deception/DiscussionView";
-import { DeceptionResultsView } from "@/views/deception/DeceptionResultsView";
-
 const ROOM_VIEWS = new Set([
   "waitingRoom",
   "multiClue", "multiGuess", "multiResults",
-  "deceptionRoleReveal", "deceptionFsPlacement", "deceptionDiscussion", "deceptionResults",
+  "deceptionRoleReveal", "deceptionFsPlacement", "deceptionDiscussion",
 ]);
 
 function postLog(event: 'connect' | 'disconnect', name: string, roomId: string, total: number) {
@@ -141,8 +139,7 @@ function RoomNavigator() {
     if (gameMode === "deception" && deceptionPhase) {
       if (deceptionPhase === "role-reveal") goTo("deceptionRoleReveal");
       else if (deceptionPhase === "fs-placement") goTo("deceptionFsPlacement");
-      else if (deceptionPhase === "discussion") goTo("deceptionDiscussion");
-      else if (deceptionPhase === "results") goTo("deceptionResults");
+      else if (deceptionPhase === "discussion" || deceptionPhase === "results") goTo("deceptionDiscussion");
       return;
     }
     if (phase == null) return;
@@ -166,7 +163,6 @@ function InRoomViews() {
     if (state.view === "deceptionRoleReveal") return <RoleRevealView />;
     if (state.view === "deceptionFsPlacement") return <FsPlacementView />;
     if (state.view === "deceptionDiscussion") return <DiscussionView />;
-    if (state.view === "deceptionResults") return <DeceptionResultsView />;
   }
 
   if (gameMode === "colorform") {

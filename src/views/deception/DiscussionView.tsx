@@ -17,14 +17,16 @@ import { CSS } from "@dnd-kit/utilities";
 import { GripVertical } from "lucide-react";
 import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useGame } from "@/context/GameContext";
-import { useStorage, useMutation } from "@/lib/liveblocks";
+import { useStorage, useMutation, clearGameData } from "@/lib/liveblocks";
+import { useLeaveRoom } from "@/hooks/useLeaveRoom";
 import { useCountdown } from "@/hooks/useCountdown";
 import { TimerBar } from "@/components/game/TimerBar";
 import { deriveKey, decryptJson } from "@/lib/crypto";
-import { PlayerStatusList, DoneNode, WaitingNode } from "@/components/game/PlayerStatusList";
+import { PlayerStatusList, DoneNode } from "@/components/game/PlayerStatusList";
 import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
-import type { MurdererSolution } from "@/types/deception";
+import { DinoGame } from "@/components/game/DinoGame";
+import type { MurdererSolution, DeceptionRoleMapBlob } from "@/types/deception";
 
 type ViewMode = "marker" | "accusation";
 
@@ -128,8 +130,9 @@ function CardWord({ text, hidden, onToggle, selectable, selected, onSelect, mode
 // ── Main component ────────────────────────────────────────────────────────────
 
 export function DiscussionView() {
-  const { mp } = useMultiplayer();
+  const { mp, setDeceptionRole } = useMultiplayer();
   const { goTo } = useGame();
+  const { leaving, handleLeave } = useLeaveRoom();
 
   const players = useStorage((s) => (s ? Object.entries(s.players) : [])) ?? [];
   const dealtCards = useStorage((s) =>
@@ -146,14 +149,17 @@ export function DiscussionView() {
     s ? (s.deceptionEliminatedPlayers as Record<string, boolean>) : {}
   ) ?? {};
   const encryptedSolution = useStorage((s) => s?.deceptionEncryptedSolutionForHost ?? null);
+  const encryptedRoleMap = useStorage((s) => s?.deceptionEncryptedRoleMapForHost ?? null);
   const fsPlayerId = useStorage((s) => s?.deceptionFsPlayerId ?? null);
   const discussionTimerDuration = useStorage((s) => s?.deceptionDiscussionTimerDuration ?? 600) ?? 600;
   const discussionTimerStart = useStorage((s) => s?.deceptionDiscussionTimerStart ?? null) ?? null;
   const currentRound = useStorage((s) => s?.deceptionCurrentRound ?? 1) ?? 1;
   const totalRounds = useStorage((s) => s?.totalRounds ?? 3) ?? 3;
   const phase = useStorage((s) => s?.deceptionPhase);
+  const revealedSolution = useStorage((s) => s?.deceptionRevealedSolution ?? null);
 
   const [solution, setSolution] = useState<MurdererSolution | null>(null);
+  const [roleMap, setRoleMap] = useState<DeceptionRoleMapBlob | null>(null);
   const processedAccusers = useRef(new Set<string>());
 
   // Accusation selection
@@ -257,6 +263,10 @@ export function DiscussionView() {
     [],
   );
 
+  const resetGame = useMutation(({ storage }) => {
+    clearGameData(storage);
+  }, []);
+
   const advanceToNextRound = useMutation(({ storage }) => {
     storage.set("deceptionCurrentRound", (storage.get("deceptionCurrentRound") ?? 1) + 1);
     storage.set("deceptionPhase", "fs-placement");
@@ -275,12 +285,22 @@ export function DiscussionView() {
   }, [encryptedSolution]);
 
   useEffect(() => {
+    if (!mp.isHost || !encryptedRoleMap || roleMap) return;
+    deriveKey(mp.roomCode, mp.playerId)
+      .then((key) => decryptJson(encryptedRoleMap, key))
+      .then((data) => setRoleMap(data as DeceptionRoleMapBlob))
+      .catch(() => {});
+  }, [encryptedRoleMap]);
+
+  useEffect(() => {
     if (!mp.isHost || !solution) return;
     const murdererPlayerId = Object.entries(dealtCards).find(([, hand]) =>
       hand.meansCards.includes(solution.meansCard) &&
       hand.evidenceCards.includes(solution.evidenceCard)
     )?.[0];
     if (!murdererPlayerId) return;
+
+    const newlyEliminated = new Set<string>();
 
     for (const [accuserId, acc] of Object.entries(accusations)) {
       if (processedAccusers.current.has(accuserId)) continue;
@@ -295,14 +315,25 @@ export function DiscussionView() {
         endWithInvestigatorsWin(murdererPlayerId, solution);
         return;
       } else {
-        eliminatePlayer(accuserId); // marks as voted wrong (can still use marker mode)
+        eliminatePlayer(accuserId);
+        newlyEliminated.add(accuserId);
       }
     }
-  }, [accusations, solution]);
+
+    // If all eligible accusers (non-FS, non-accomplice) have voted wrong, murderer wins
+    const accompliceId = roleMap?.accomplicePlayerId;
+    const eligibleAccusers = players.filter(([id]) => id !== fsPlayerId && id !== accompliceId);
+    const allEliminated =
+      eligibleAccusers.length > 0 &&
+      eligibleAccusers.every(([id]) => eliminatedPlayers[id] || newlyEliminated.has(id));
+    if (allEliminated) {
+      endWithMurdererWins(murdererPlayerId, solution);
+    }
+  }, [accusations, solution, roleMap]);
 
   useEffect(() => {
     if (phase === "fs-placement") goTo("deceptionFsPlacement");
-    if (phase === "results") goTo("deceptionResults");
+    if (phase === null) { setDeceptionRole(null); goTo("waitingRoom"); }
   }, [phase]);
 
   const timeLeft = useCountdown(discussionTimerStart, discussionTimerDuration, 500);
@@ -338,6 +369,98 @@ export function DiscussionView() {
           return entry ? [entry] : [];
         })
       : players;
+
+  // ── Results screen (phase === "results") ──────────────────────────────────
+  if (phase === "results" && revealedSolution) {
+    const playerMap = Object.fromEntries(players);
+    const murdererName = playerMap[revealedSolution.murdererPlayerId]?.name ?? "Unknown";
+    const murdererColor = playerMap[revealedSolution.murdererPlayerId]?.color ?? "#888";
+    const correctAccusers = players
+      .map(([id]) => id)
+      .filter((id) => {
+        const acc = accusations[id];
+        return (
+          acc &&
+          acc.accusedPlayerId === revealedSolution.murdererPlayerId &&
+          acc.meansCard === revealedSolution.meansCard &&
+          acc.evidenceCard === revealedSolution.evidenceCard
+        );
+      });
+    const investigatorsWin = correctAccusers.length > 0;
+
+    function handlePlayAgain() {
+      setDeceptionRole(null);
+      resetGame();
+      goTo("waitingRoom");
+    }
+
+    return (
+      <div className="min-h-screen flex flex-col items-center justify-start bg-background px-4 py-8 pb-24 overflow-y-auto">
+        <div className="w-full max-w-sm flex flex-col gap-6">
+          <div className={`rounded-xl border px-5 py-4 text-center ${investigatorsWin ? "border-green-500/40 bg-green-500/10" : "border-red-500/40 bg-red-500/10"}`}>
+            <p className="text-lg font-bold">{investigatorsWin ? "Investigators Win!" : "The Murderer Escapes!"}</p>
+            <p className="text-sm text-muted-foreground mt-1">
+              {investigatorsWin
+                ? `${correctAccusers.length} investigator${correctAccusers.length !== 1 ? "s" : ""} solved the case`
+                : "No one identified the murderer correctly"}
+            </p>
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <p className="text-xs uppercase tracking-widest text-muted-foreground">The Murderer</p>
+            <div className="rounded-xl border bg-muted/30 px-4 py-3 flex items-center gap-3">
+              <span className="w-3 h-3 rounded-full flex-shrink-0" style={{ background: murdererColor }} />
+              <span className="font-semibold text-foreground">{murdererName}</span>
+            </div>
+            <div className="grid grid-cols-2 gap-2 mt-1">
+              <div className="rounded-lg border bg-muted/20 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Weapon</p>
+                <p className="text-sm font-medium text-foreground mt-0.5">{revealedSolution.meansCard}</p>
+              </div>
+              <div className="rounded-lg border bg-muted/20 px-3 py-2">
+                <p className="text-[10px] uppercase tracking-widest text-muted-foreground">Evidence</p>
+                <p className="text-sm font-medium text-foreground mt-0.5">{revealedSolution.evidenceCard}</p>
+              </div>
+            </div>
+          </div>
+
+          {Object.keys(accusations).length > 0 && (
+            <div className="flex flex-col gap-2">
+              <p className="text-xs uppercase tracking-widest text-muted-foreground">Accusations</p>
+              {players.map(([id, info]) => {
+                const acc = accusations[id];
+                if (!acc) return null;
+                const isCorrect =
+                  acc.accusedPlayerId === revealedSolution.murdererPlayerId &&
+                  acc.meansCard === revealedSolution.meansCard &&
+                  acc.evidenceCard === revealedSolution.evidenceCard;
+                return (
+                  <div key={id} className={`rounded-lg border px-3 py-2 flex items-start gap-2 ${isCorrect ? "border-green-500/40 bg-green-500/5" : "border-border"}`}>
+                    <span className="w-2 h-2 rounded-full mt-1 flex-shrink-0" style={{ background: info.color }} />
+                    <div className="flex-1 min-w-0">
+                      <p className="text-xs font-medium text-foreground">{info.name}</p>
+                      <p className="text-xs text-muted-foreground">
+                        {playerMap[acc.accusedPlayerId]?.name ?? "?"} · {acc.meansCard} · {acc.evidenceCard}
+                      </p>
+                    </div>
+                    <span className={`text-xs font-semibold flex-shrink-0 ${isCorrect ? "text-green-400" : "text-muted-foreground"}`}>
+                      {isCorrect ? "✓ Correct" : "✗ Wrong"}
+                    </span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {mp.isHost && <Button className="w-full" onClick={handlePlayAgain}>Play Again</Button>}
+          {!mp.isHost && <p className="text-sm text-center text-muted-foreground">Waiting for host to start a new game<Ellipsis /></p>}
+          <Button variant="ghost" className="w-full text-muted-foreground" onClick={handleLeave} disabled={leaving}>
+            {leaving ? "Leaving…" : "Leave Room"}
+          </Button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen flex flex-col items-center justify-start bg-background px-4 py-8 pb-36 overflow-y-auto">
@@ -636,7 +759,7 @@ export function DiscussionView() {
                 ? eliminatedPlayers[id]
                   ? <span className="text-amber-500/80 text-xs">Wrong vote</span>
                   : <DoneNode label="Voted" />
-                : <WaitingNode label="Thinking" />,
+                : null,
           }))}
         />
 
@@ -672,6 +795,8 @@ export function DiscussionView() {
             {!isFinalRound && <Ellipsis />}
           </p>
         )}
+
+        {(iHaveAccused || !canAccuse) && <DinoGame height={130} />}
       </div>
 
       {/* Sticky submit accusation button */}

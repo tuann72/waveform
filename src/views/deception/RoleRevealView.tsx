@@ -3,7 +3,6 @@ import { useMultiplayer } from "@/context/MultiplayerContext";
 import { useGame } from "@/context/GameContext";
 import { useStorage, useMutation } from "@/lib/liveblocks";
 import { deriveKey, decryptJson, encryptJson } from "@/lib/crypto";
-import { PlayerStatusList, DoneNode, WaitingNode } from "@/components/game/PlayerStatusList";
 import { Button } from "@/components/ui/button";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import { useLeaveRoom } from "@/hooks/useLeaveRoom";
@@ -291,17 +290,6 @@ export function RoleRevealView() {
             Waiting for others<Ellipsis />
           </p>
         )}
-
-        {/* Player readiness */}
-        <PlayerStatusList
-          myPlayerId={mp.playerId}
-          entries={players.map(([id, info]) => ({
-            id,
-            name: info.name,
-            color: info.color,
-            rightNode: acknowledged[id] ? <DoneNode label="Ready" /> : <WaitingNode />,
-          }))}
-        />
 
         <p className="text-xs text-center text-muted-foreground">
           {acknowledgedCount} / {totalPlayers} ready

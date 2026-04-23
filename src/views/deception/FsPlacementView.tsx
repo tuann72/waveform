@@ -10,7 +10,7 @@ import { Separator } from "@/components/ui/separator";
 import { Ellipsis } from "@/components/ui/ellipsis";
 import type { DeceptionRoleBlob, MurdererSolution } from "@/types/deception";
 
-const PERMANENT_INDICES = new Set([0, 1]); // Location, Cause of Death
+const PERMANENT_INDICES = new Set([0, 1, 2]); // Location, Cause of Death, Evidence Left Behind
 
 export function FsPlacementView() {
   const { mp } = useMultiplayer();
@@ -34,10 +34,14 @@ export function FsPlacementView() {
     s ? (s.deceptionDealtCards as Record<string, { meansCards: string[]; evidenceCards: string[] }>) : {}
   ) ?? {};
   const players = useStorage((s) => (s ? Object.entries(s.players) : [])) ?? [];
+  const fsPlayerId = useStorage((s) => s?.deceptionFsPlayerId ?? null);
   const phase = useStorage((s) => s?.deceptionPhase);
 
   const [myRole, setMyRole] = useState<DeceptionRoleBlob | null>(null);
   const [fsSolution, setFsSolution] = useState<MurdererSolution | null>(null);
+  // Local undo state: maps tileIndex → the tile that was there before the reroll
+  const [undoPrev, setUndoPrev] = useState<Record<number, { category: string; options: string[] }>>({});
+  const [undone, setUndone] = useState<Set<number>>(new Set());
 
   const timeLeft = useCountdown(fsTimerStart, fsTimerDuration, 500);
   const isFs = myRole?.role === "forensic-scientist";
@@ -80,6 +84,35 @@ export function FsPlacementView() {
     storage.set("deceptionFsRerolledTiles", [...(storage.get("deceptionFsRerolledTiles") as number[]), tileIndex]);
     storage.get("deceptionMarkers").delete(outgoing.category);
   }, []);
+
+  const undoReroll = useMutation(
+    ({ storage }, tileIndex: number, prevTile: { category: string; options: string[] }) => {
+      const tiles = storage.get("deceptionSceneTiles") as Array<{ category: string; options: string[] }> | null;
+      const pool = storage.get("deceptionTilePool") as Array<{ category: string; options: string[] }>;
+      if (!tiles || !pool) return;
+      const currentTile = tiles[tileIndex];
+      const newTiles = [...tiles];
+      newTiles[tileIndex] = prevTile;
+      storage.set("deceptionSceneTiles", newTiles);
+      storage.set("deceptionTilePool", [...pool, currentTile]);
+      storage.get("deceptionMarkers").delete(currentTile.category);
+    },
+    [],
+  );
+
+  function handleReroll(tileIndex: number) {
+    if (!sceneTiles) return;
+    const prev = sceneTiles[tileIndex];
+    rerollTile(tileIndex);
+    setUndoPrev((s) => ({ ...s, [tileIndex]: prev }));
+  }
+
+  function handleUndo(tileIndex: number) {
+    const prev = undoPrev[tileIndex];
+    if (!prev) return;
+    undoReroll(tileIndex, prev);
+    setUndone((s) => new Set([...s, tileIndex]));
+  }
 
   const advanceToDiscussion = useMutation(({ storage }) => {
     storage.set("deceptionPhase", "discussion");
@@ -144,10 +177,20 @@ export function FsPlacementView() {
                   </p>
                   {isFs && !isPermanent && (
                     rerolledTiles.includes(tileIndex) ? (
-                      <span className="text-[10px] text-muted-foreground/40">rerolled</span>
+                      <div className="flex items-center gap-2">
+                        <span className="text-[10px] text-muted-foreground/40">rerolled</span>
+                        {!undone.has(tileIndex) && undoPrev[tileIndex] && (
+                          <button
+                            onClick={() => handleUndo(tileIndex)}
+                            className="text-[10px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-primary/50 transition-colors cursor-pointer"
+                          >
+                            undo
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <button
-                        onClick={() => canReroll(tileIndex) && rerollTile(tileIndex)}
+                        onClick={() => canReroll(tileIndex) && handleReroll(tileIndex)}
                         disabled={!canReroll(tileIndex)}
                         className="text-[10px] px-2 py-0.5 rounded border border-border text-muted-foreground hover:border-amber-500/50 transition-colors cursor-pointer disabled:cursor-default disabled:opacity-40"
                       >
@@ -238,7 +281,11 @@ export function FsPlacementView() {
 
         {!isFs && (
           <p className="text-sm text-center text-muted-foreground">
-            Waiting for the Forensic Scientist<Ellipsis />
+            Waiting for the Forensic Scientist
+            {fsPlayerId && (
+              <> ({players.find(([id]) => id === fsPlayerId)?.[1]?.name ?? "?"})</>
+            )}
+            <Ellipsis />
           </p>
         )}
         {mp.isHost && !isFs && (
