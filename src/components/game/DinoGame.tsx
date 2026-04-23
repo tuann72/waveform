@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { Game2048 } from "./Game2048";
 
 const W = 320;
 const DINO_X = 42;
@@ -72,6 +73,12 @@ export function DinoGame({ height = 160 }: Props) {
   const s = useRef<State>(makeState(groundY));
   const isPaused = useRef(false);
   const unpausedAt = useRef(0);
+  const [collapsed, setCollapsed] = useState(false);
+  const [selectedGame, setSelectedGame] = useState<"dino" | "2048">("dino");
+  const collapsedRef = useRef(collapsed);
+  const selectedGameRef = useRef(selectedGame);
+  collapsedRef.current = collapsed;
+  selectedGameRef.current = selectedGame;
 
   const birdLowY = groundY - DINO_BODY_H - 10;
   const birdHighY = groundY - DINO_TOTAL_H - 13;
@@ -226,6 +233,10 @@ export function DinoGame({ height = 160 }: Props) {
     let lastTime = 0;
 
     function tick(now: number) {
+      if (collapsedRef.current || selectedGameRef.current !== "dino") {
+        rafRef.current = requestAnimationFrame(tick);
+        return;
+      }
       const elapsed = now - lastTime;
       if (elapsed < FRAME_MS * 0.75) {
         rafRef.current = requestAnimationFrame(tick);
@@ -324,7 +335,7 @@ export function DinoGame({ height = 160 }: Props) {
 
     rafRef.current = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(rafRef.current);
-  }, [height, groundY, birdLowY, birdHighY, collapsed]);
+  }, [height, groundY, birdLowY, birdHighY]);
 
   function handleKeyDown(e: React.KeyboardEvent) {
     if (e.key === "ArrowUp") {
@@ -367,8 +378,6 @@ export function DinoGame({ height = 160 }: Props) {
     }
   }
 
-  const [collapsed, setCollapsed] = useState(false);
-
   return (
     <div className="flex flex-col gap-1.5">
       <button
@@ -378,25 +387,50 @@ export function DinoGame({ height = 160 }: Props) {
         while you wait {collapsed ? "▸" : "▾"}
       </button>
       {!collapsed && (
-        <div
-          className="rounded-lg border overflow-hidden select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground bg-background"
-          style={{ touchAction: "none", cursor: "pointer" }}
-          onMouseMove={handleMouseMove}
-          onPointerDown={handlePointerDown}
-          onPointerUp={stopDuck}
-          onPointerLeave={stopDuck}
-          onKeyDown={handleKeyDown}
-          onKeyUp={handleKeyUp}
-          tabIndex={0}
-          role="button"
-          aria-label="Dino runner mini-game"
-        >
-          <canvas
-            ref={canvasRef}
-            width={W}
-            height={height}
-            className="w-full block"
-          />
+        <div className="flex gap-1 justify-center">
+          <button
+            onClick={() => setSelectedGame("dino")}
+            className={`text-xs px-2 py-0.5 rounded transition-colors cursor-pointer ${selectedGame === "dino" ? "text-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
+          >
+            Dinosaur
+          </button>
+          <span className="text-muted-foreground/30 text-xs self-center">|</span>
+          <button
+            onClick={() => setSelectedGame("2048")}
+            className={`text-xs px-2 py-0.5 rounded transition-colors cursor-pointer ${selectedGame === "2048" ? "text-foreground" : "text-muted-foreground/40 hover:text-muted-foreground"}`}
+          >
+            2048
+          </button>
+        </div>
+      )}
+      {/* Canvas stays mounted always so the RAF loop never needs to restart */}
+      <div
+        className="rounded-lg border overflow-hidden select-none focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring text-foreground bg-background"
+        style={{
+          display: !collapsed && selectedGame === "dino" ? undefined : "none",
+          touchAction: "none",
+          cursor: "pointer",
+        }}
+        onMouseMove={handleMouseMove}
+        onPointerDown={handlePointerDown}
+        onPointerUp={stopDuck}
+        onPointerLeave={stopDuck}
+        onKeyDown={handleKeyDown}
+        onKeyUp={handleKeyUp}
+        tabIndex={0}
+        role="button"
+        aria-label="Dino runner mini-game"
+      >
+        <canvas
+          ref={canvasRef}
+          width={W}
+          height={height}
+          className="w-full block"
+        />
+      </div>
+      {!collapsed && selectedGame === "2048" && (
+        <div className="rounded-lg border overflow-hidden text-foreground bg-background">
+          <Game2048 />
         </div>
       )}
     </div>
